@@ -66,13 +66,13 @@ export const DEFAULT_NEWS: NewsItem[] = [
   {
     id: '52d95507-e7a3-4f92-8721-70107c643e18',
     title: 'Thông báo: Khởi động sự kiện Campaign 2026',
-    content: 'Chào mừng các chiến binh tham gia chiến dịch Spring Maneuvers 2026! Thời gian diễn ra từ 23/03/2026 đến 06/04/2026. Các đội vui lòng kiểm tra danh sách thành viên và chuẩn bị phương tiện tác chiến.',
+    content: 'Chào mừng chiến binh tham gia chiến dịch Spring Maneuvers 2026! Thời gian diễn ra từ 23/03/2026 đến 06/04/2026. Đội vui lòng kiểm tra danh sách thành viên và chuẩn bị phương tiện tác chiến.',
     created_at: '2026-03-20T08:00:00Z'
   },
   {
     id: 'c6df86f3-ec10-4f2c-aacf-7bc9aa1c546c',
     title: 'Quy định đăng ký & Chốt danh sách',
-    content: 'Mỗi chiến binh đăng ký với tên In-Game chính xác và các xe sử dụng. Khi đội tuyển được Ban Quản Trị / Điều Hành chốt danh sách, thành viên mới sẽ không thể đăng ký thêm vào đội đó.',
+    content: 'Mỗi chiến binh đăng ký với tên In-Game chính xác và xe sử dụng. Khi đội tuyển được Ban Quản Trị / Điều Hành chốt danh sách, thành viên mới sẽ không thể đăng ký thêm vào đội đó.',
     created_at: '2026-03-21T09:30:00Z'
   }
 ];

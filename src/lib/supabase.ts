@@ -1,9 +1,10 @@
 /// <reference types="vite/client" />
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-export const DEFAULT_SUPABASE_URL = 'https://hcfoyxzigqopjpyodizl.supabase.co';
+// Default Supabase Cloud Database credentials (active project: czlmqxfxfbrwzmshespi)
+export const DEFAULT_SUPABASE_URL = 'https://czlmqxfxfbrwzmshespi.supabase.co';
 export const DEFAULT_SUPABASE_ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhjZm95eHppZ3FvcGpweW9kaXpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIwMDQ0MzYsImV4cCI6MjA4NzU4MDQzNn0.nuGUiCdilV2wNA4CGrIWd7Gfqh4zzHoXrN5FmwQnSRA';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6bG1xeGZ4ZmJyd3ptc2hlc3BpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1OTE2MDUsImV4cCI6MjA1OTE2NzYwNX0.CvsY3d0pVwYdm7ZxiyUPFsByNj35U49fhdfytOh44ww';
 
 /**
  * Clean & sanitize Supabase Project URL.
@@ -51,6 +52,8 @@ export function isValidSupabaseKey(key?: string | null): boolean {
   return cleaned.length >= 20;
 }
 
+let serverConfigCache: { url: string; key: string } | null = null;
+
 export function getEffectiveSupabaseConfig() {
   let customUrl: string | null = null;
   let customKey: string | null = null;
@@ -68,18 +71,21 @@ export function getEffectiveSupabaseConfig() {
   const validCustomUrl = isValidSupabaseUrl(customUrl) ? sanitizeSupabaseUrl(customUrl) : null;
   const validCustomKey = isValidSupabaseKey(customKey) ? sanitizeSupabaseKey(customKey) : null;
 
+  const validServerUrl = serverConfigCache && isValidSupabaseUrl(serverConfigCache.url) ? sanitizeSupabaseUrl(serverConfigCache.url) : null;
+  const validServerKey = serverConfigCache && isValidSupabaseKey(serverConfigCache.key) ? sanitizeSupabaseKey(serverConfigCache.key) : null;
+
   const validEnvUrl = isValidSupabaseUrl(envUrl) ? sanitizeSupabaseUrl(envUrl) : null;
   const validEnvKey = isValidSupabaseKey(envKey) ? sanitizeSupabaseKey(envKey) : null;
 
-  const url = validCustomUrl || validEnvUrl || DEFAULT_SUPABASE_URL;
-  const key = validCustomKey || validEnvKey || DEFAULT_SUPABASE_ANON_KEY;
+  const url = validCustomUrl || validServerUrl || validEnvUrl || DEFAULT_SUPABASE_URL;
+  const key = validCustomKey || validServerKey || validEnvKey || DEFAULT_SUPABASE_ANON_KEY;
 
-  const isConfiguredByUser = Boolean(validCustomUrl || validEnvUrl);
+  const isConfiguredByUser = Boolean(validCustomUrl || validServerUrl || validEnvUrl);
 
   return {
     url,
     key,
-    isCustom: Boolean(customUrl || customKey),
+    isCustom: Boolean(customUrl || customKey || serverConfigCache),
     isConfiguredByUser
   };
 }
@@ -107,7 +113,37 @@ export function getActiveSupabaseClient(): SupabaseClient {
   return cachedClient;
 }
 
-export function setCustomSupabaseConfig(rawUrl: string, rawKey: string) {
+/**
+ * Fetch server-wide persistent Supabase config so every visitor on any device connects to active Supabase
+ */
+export async function syncServerSupabaseConfig(): Promise<{ url: string; key: string }> {
+  try {
+    const res = await fetch('/api/supabase/config');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.url && isValidSupabaseUrl(data.url) && data.key && isValidSupabaseKey(data.key)) {
+        serverConfigCache = {
+          url: sanitizeSupabaseUrl(data.url),
+          key: sanitizeSupabaseKey(data.key)
+        };
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('app_custom_supabase_url', serverConfigCache.url);
+          localStorage.setItem('app_custom_supabase_anon_key', serverConfigCache.key);
+        }
+        cachedClient = null; // reset client cache
+        return serverConfigCache;
+      }
+    }
+  } catch {}
+  return { url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_ANON_KEY };
+}
+
+// Auto sync on load for all clients
+if (typeof window !== 'undefined') {
+  syncServerSupabaseConfig().catch(() => {});
+}
+
+export async function setCustomSupabaseConfig(rawUrl: string, rawKey: string) {
   const cleanUrl = sanitizeSupabaseUrl(rawUrl);
   const cleanKey = sanitizeSupabaseKey(rawKey);
 
@@ -125,20 +161,38 @@ export function setCustomSupabaseConfig(rawUrl: string, rawKey: string) {
     }
   }
 
-  // Invalidate client cache
+  serverConfigCache = { url: cleanUrl, key: cleanKey };
   cachedClient = null;
   lastUrl = '';
   lastKey = '';
+
+  // Persist to server so ALL other users on ALL devices automatically use this new config
+  try {
+    await fetch('/api/supabase/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: cleanUrl, key: cleanKey })
+    });
+  } catch {}
 }
 
-export function clearCustomSupabaseConfig() {
+export async function clearCustomSupabaseConfig() {
   if (typeof window !== 'undefined') {
     localStorage.removeItem('app_custom_supabase_url');
     localStorage.removeItem('app_custom_supabase_anon_key');
   }
+  serverConfigCache = null;
   cachedClient = null;
   lastUrl = '';
   lastKey = '';
+
+  try {
+    await fetch('/api/supabase/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_ANON_KEY })
+    });
+  } catch {}
 }
 
 // Dynamic proxy so any call to supabase.* uses the currently active client

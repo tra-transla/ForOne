@@ -4,7 +4,9 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import path from 'path';
-import { getLocalSqlite, initSqliteSchema } from './server_db.ts';
+import fs from 'fs';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getLocalSqlite } from './server_db.ts';
 
 const app = express();
 const PORT = 3000;
@@ -13,6 +15,85 @@ const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-for-dev';
 app.use(express.json());
 app.use(cookieParser());
 app.use(cors());
+
+// Helper for safe background async execution
+function runAsync(fn: () => Promise<any>) {
+  fn().catch(() => {});
+}
+
+// ==========================================
+// SERVER-SIDE PERSISTENT SUPABASE CONFIGURATION
+// ==========================================
+const CONFIG_PATH = path.join(process.cwd(), 'supabase_config.json');
+const DEFAULT_URL = 'https://czlmqxfxfbrwzmshespi.supabase.co';
+const DEFAULT_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6bG1xeGZ4ZmJyd3ptc2hlc3BpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1OTE2MDUsImV4cCI6MjA1OTE2NzYwNX0.CvsY3d0pVwYdm7ZxiyUPFsByNj35U49fhdfytOh44ww';
+
+function getServerSupabaseConfig() {
+  let fileUrl = '';
+  let fileKey = '';
+
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      const content = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf-8'));
+      if (content.url) fileUrl = String(content.url).trim();
+      if (content.key) fileKey = String(content.key).trim();
+    }
+  } catch {}
+
+  const envUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const envKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+
+  const url = (fileUrl || envUrl || DEFAULT_URL).trim();
+  const key = (fileKey || envKey || DEFAULT_KEY).trim();
+
+  return { url, key };
+}
+
+let serverSupabaseClient: SupabaseClient | null = null;
+let lastServerUrl = '';
+let lastServerKey = '';
+
+function getServerSupabaseClient(): SupabaseClient | null {
+  const cfg = getServerSupabaseConfig();
+  if (!cfg.url || !cfg.key) return null;
+  if (!serverSupabaseClient || lastServerUrl !== cfg.url || lastServerKey !== cfg.key) {
+    lastServerUrl = cfg.url;
+    lastServerKey = cfg.key;
+    try {
+      serverSupabaseClient = createClient(cfg.url, cfg.key, { auth: { persistSession: false } });
+    } catch {
+      serverSupabaseClient = null;
+    }
+  }
+  return serverSupabaseClient;
+}
+
+// Background push to Supabase for registrations
+async function pushRegistrationToSupabase(reg: {
+  id: string;
+  team: string;
+  in_game_name: string;
+  tanks: string;
+  is_winner?: boolean;
+}) {
+  try {
+    const client = getServerSupabaseClient();
+    if (!client) return;
+    await client.from('registrations').upsert([
+      {
+        id: reg.id,
+        team: reg.team,
+        in_game_name: reg.in_game_name,
+        tanks: reg.tanks,
+        is_winner: Boolean(reg.is_winner),
+        created_at: new Date().toISOString()
+      }
+    ], { onConflict: 'id' });
+  } catch (err) {
+    console.warn('Server-side Supabase push warning:', err);
+  }
+}
 
 /**
  * Local Database Executor:
@@ -46,6 +127,32 @@ const authenticateToken = (req: any, res: any, next: any) => {
 // SUPABASE BACKUP & STATUS API
 // ==========================================
 
+// Get persistent Supabase URL and Key for all frontend clients
+app.get('/api/supabase/config', (req, res) => {
+  const cfg = getServerSupabaseConfig();
+  res.json(cfg);
+});
+
+// Update persistent Supabase URL and Key server-wide
+app.post('/api/supabase/config', (req, res) => {
+  const { url, key } = req.body;
+  if (!url || !key) {
+    return res.status(400).json({ error: 'URL và Key không được để trống' });
+  }
+  try {
+    const data = {
+      url: String(url).trim(),
+      key: String(key).trim(),
+      updatedAt: new Date().toISOString()
+    };
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    serverSupabaseClient = null; // reset client
+    res.json({ success: true, message: 'Đã lưu cấu hình Supabase vĩnh viễn trên hệ thống!' });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Không thể lưu cấu hình server: ' + err.message });
+  }
+});
+
 // Get current database status & local statistics
 app.get('/api/db/status', async (req, res) => {
   let stats: any = {};
@@ -64,11 +171,14 @@ app.get('/api/db/status', async (req, res) => {
     stats = { error: err.message };
   }
 
+  const cfg = getServerSupabaseConfig();
+
   res.json({
     engine: 'Supabase Cloud Database (PostgreSQL) + Local SQLite Backup',
     mode: 'supabase',
     isConfigured: true,
     connected: true,
+    supabaseUrl: cfg.url,
     error: null,
     stats
   });
@@ -215,6 +325,14 @@ app.post('/api/teams', async (req, res) => {
       [teamId, cleanName, lockedVal]
     );
 
+    // Push to Supabase in background
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('teams').upsert([{ id: teamId, name: cleanName, is_locked: Boolean(lockedVal) }], { onConflict: 'name' });
+      }
+    });
+
     res.status(201).json({ id: teamId, name: cleanName, is_locked: Boolean(lockedVal) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -236,6 +354,15 @@ app.put('/api/teams/:id', async (req, res) => {
       await executeDb('UPDATE teams SET name = ? WHERE id = ? OR name = ?', [cleanName, idOrName, idOrName]);
       await executeDb('UPDATE registrations SET team = ? WHERE team = ?', [cleanName, oldName]);
     }
+
+    // Push update to Supabase
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client && name) {
+        await client.from('teams').update({ name: name.trim(), is_locked: Boolean(is_locked) }).or(`id.eq.${idOrName},name.eq.${idOrName}`);
+      }
+    });
+
     res.json({ message: 'Team updated successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -247,6 +374,14 @@ app.delete('/api/teams/:id', async (req, res) => {
   const { name } = req.body || {};
   try {
     await executeDb('DELETE FROM teams WHERE id = ? OR name = ? OR name = ?', [idOrName, idOrName, name || '']);
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('teams').delete().or(`id.eq.${idOrName},name.eq.${idOrName}`);
+      }
+    });
+
     res.json({ message: 'Team deleted successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -282,10 +417,24 @@ app.post('/api/register', async (req, res) => {
     }
 
     const regId = id || crypto.randomUUID();
+    const cleanIgn = ign.trim();
+    const cleanTanks = tanks.trim();
+
     await executeDb(
       `INSERT INTO registrations (id, team, in_game_name, tanks, is_winner, created_at) VALUES (?, ?, ?, ?, 0, datetime('now'))`,
-      [regId, team, ign.trim(), tanks.trim()]
+      [regId, team, cleanIgn, cleanTanks]
     );
+
+    // ALSO push directly to Supabase Cloud Database!
+    runAsync(async () => {
+      await pushRegistrationToSupabase({
+        id: regId,
+        team,
+        in_game_name: cleanIgn,
+        tanks: cleanTanks,
+        is_winner: false
+      });
+    });
 
     res.status(201).json({ id: regId, message: 'Đăng ký thành công' });
   } catch (err: any) {
@@ -306,6 +455,19 @@ app.put('/api/registrations/:id', async (req, res) => {
         [team, in_game_name.trim(), tanks.trim(), id]
       );
     }
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        const updateData: any = {};
+        if (is_winner !== undefined) updateData.is_winner = Boolean(is_winner);
+        if (team) updateData.team = team;
+        if (in_game_name) updateData.in_game_name = in_game_name.trim();
+        if (tanks) updateData.tanks = tanks.trim();
+        await client.from('registrations').update(updateData).eq('id', id);
+      }
+    });
+
     res.json({ message: 'Registration updated successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -321,6 +483,14 @@ app.delete('/api/registrations/:id', async (req, res) => {
     } else {
       await executeDb('DELETE FROM registrations WHERE id = ?', [id]);
     }
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('registrations').delete().eq('id', id);
+      }
+    });
+
     res.json({ success: true, message: 'Đã xóa đăng ký thành công' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -342,22 +512,22 @@ app.post('/api/news', async (req, res) => {
   if (!title || !content) return res.status(400).json({ error: 'Tiêu đề và nội dung không được để trống' });
   try {
     const newsId = id || crypto.randomUUID();
+    const cleanTitle = title.trim();
+    const cleanContent = content.trim();
+
     await executeDb(
       `INSERT INTO news (id, title, content, created_at) VALUES (?, ?, ?, datetime('now'))`,
-      [newsId, title.trim(), content.trim()]
+      [newsId, cleanTitle, cleanContent]
     );
-    res.status(201).json({ id: newsId, title: title.trim(), content: content.trim() });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
-app.put('/api/news/:id', async (req, res) => {
-  const { id } = req.params;
-  const { title, content } = req.body;
-  try {
-    await executeDb('UPDATE news SET title = ?, content = ? WHERE id = ?', [title.trim(), content.trim(), id]);
-    res.json({ message: 'News updated successfully' });
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('news').upsert([{ id: newsId, title: cleanTitle, content: cleanContent }], { onConflict: 'id' });
+      }
+    });
+
+    res.status(201).json({ id: newsId, title: cleanTitle, content: cleanContent });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -367,13 +537,70 @@ app.delete('/api/news/:id', async (req, res) => {
   const { id } = req.params;
   try {
     await executeDb('DELETE FROM news WHERE id = ?', [id]);
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('news').delete().eq('id', id);
+      }
+    });
+
     res.json({ message: 'News deleted successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Users Management API
+// Campaign Settings API
+app.get('/api/campaign-settings', async (req, res) => {
+  try {
+    const { results } = await executeDb('SELECT * FROM campaign_settings WHERE id = 1 LIMIT 1');
+    if (results.length > 0) {
+      res.json(results[0]);
+    } else {
+      res.json({
+        campaign_name: 'Campaign 2026',
+        phase_name: 'Spring Maneuvers',
+        start_date: '23/03/2026',
+        end_date: '06/04/2026'
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/campaign-settings', async (req, res) => {
+  const { campaign_name, phase_name, start_date, end_date } = req.body;
+  try {
+    await executeDb(
+      `INSERT INTO campaign_settings (id, campaign_name, phase_name, start_date, end_date, updated_at)
+       VALUES (1, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(id) DO UPDATE SET campaign_name=excluded.campaign_name, phase_name=excluded.phase_name, start_date=excluded.start_date, end_date=excluded.end_date, updated_at=datetime('now')`,
+      [campaign_name, phase_name, start_date, end_date]
+    );
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('campaign_settings').upsert({
+          id: 1,
+          campaign_name,
+          phase_name,
+          start_date,
+          end_date,
+          updated_at: new Date().toISOString()
+        });
+      }
+    });
+
+    res.json({ message: 'Settings updated successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Users management API
 app.get('/api/users', async (req, res) => {
   try {
     const { results } = await executeDb('SELECT id, username, role, is_locked, created_at FROM users ORDER BY created_at ASC');
@@ -388,18 +615,24 @@ app.get('/api/users', async (req, res) => {
 });
 
 app.post('/api/users', async (req, res) => {
-  const { id, username, password, role } = req.body;
-  if (!username) return res.status(400).json({ error: 'Tên đăng nhập không được để trống' });
+  const { username, password, role } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Tên người dùng và mật khẩu không được để trống' });
   try {
-    const userId = id || crypto.randomUUID();
+    const userId = crypto.randomUUID();
     const cleanUser = username.trim();
-    const cleanPass = password || 'Sonla@2026';
     const cleanRole = role || 'Điều hành';
 
     await executeDb(
       `INSERT INTO users (id, username, password, role, is_locked, created_at) VALUES (?, ?, ?, ?, 0, datetime('now'))`,
-      [userId, cleanUser, cleanPass, cleanRole]
+      [userId, cleanUser, password, cleanRole]
     );
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('users').upsert([{ id: userId, username: cleanUser, password, role: cleanRole }], { onConflict: 'username' });
+      }
+    });
 
     res.status(201).json({ id: userId, username: cleanUser, role: cleanRole, is_locked: false });
   } catch (err: any) {
@@ -411,15 +644,27 @@ app.put('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const { password, role, is_locked } = req.body;
   try {
-    if (is_locked !== undefined) {
-      await executeDb('UPDATE users SET is_locked = ? WHERE id = ?', [is_locked ? 1 : 0, id]);
+    if (password) {
+      await executeDb('UPDATE users SET password = ? WHERE id = ? OR username = ?', [password, id, id]);
     }
     if (role) {
-      await executeDb('UPDATE users SET role = ? WHERE id = ?', [role, id]);
+      await executeDb('UPDATE users SET role = ? WHERE id = ? OR username = ?', [role, id, id]);
     }
-    if (password) {
-      await executeDb('UPDATE users SET password = ? WHERE id = ?', [password, id]);
+    if (is_locked !== undefined) {
+      await executeDb('UPDATE users SET is_locked = ? WHERE id = ? OR username = ?', [is_locked ? 1 : 0, id, id]);
     }
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        const updateData: any = {};
+        if (password) updateData.password = password;
+        if (role) updateData.role = role;
+        if (is_locked !== undefined) updateData.is_locked = Boolean(is_locked);
+        await client.from('users').update(updateData).or(`id.eq.${id},username.eq.${id}`);
+      }
+    });
+
     res.json({ message: 'User updated successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -429,69 +674,40 @@ app.put('/api/users/:id', async (req, res) => {
 app.delete('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    await executeDb('DELETE FROM users WHERE id = ?', [id]);
+    await executeDb('DELETE FROM users WHERE id = ? OR username = ?', [id, id]);
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('users').delete().or(`id.eq.${id},username.eq.${id}`);
+      }
+    });
+
     res.json({ message: 'User deleted successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Campaign Settings API
-app.get('/api/campaign-settings', async (req, res) => {
-  try {
-    const { results } = await executeDb('SELECT * FROM campaign_settings WHERE id = 1 LIMIT 1');
-    if (results.length > 0) {
-      res.json(results[0]);
-    } else {
-      res.json({
-        id: 1,
-        campaign_name: 'Campaign 2026',
-        phase_name: 'Spring Maneuvers',
-        start_date: '23/03/2026',
-        end_date: '06/04/2026'
-      });
-    }
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/campaign-settings', async (req, res) => {
-  const { campaign_name, phase_name, start_date, end_date } = req.body;
-  try {
-    await executeDb(
-      `INSERT INTO campaign_settings (id, campaign_name, phase_name, start_date, end_date, updated_at)
-       VALUES (1, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT(id) DO UPDATE SET campaign_name=excluded.campaign_name, phase_name=excluded.phase_name, start_date=excluded.start_date, end_date=excluded.end_date`,
-      [campaign_name, phase_name, start_date, end_date]
-    );
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Server Initialization
+// Vite Integration
 async function startServer() {
-  const db = getLocalSqlite();
-  initSqliteSchema(db);
+  getLocalSqlite();
 
-  if (process.env.NODE_ENV === 'production') {
-    const distPath = path.resolve(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  } else {
+  if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+  } else {
+    app.use(express.static('dist'));
+    app.get('*', (req, res) => {
+      res.sendFile(path.resolve('dist', 'index.html'));
+    });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Supabase Application Server running on http://localhost:${PORT}`);
+  app.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
