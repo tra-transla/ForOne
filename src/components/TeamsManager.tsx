@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trash2, Plus, Users, Edit2, Save, X, Swords, Lock, Unlock, ShieldAlert } from 'lucide-react';
+import { Trash2, Plus, Users, Edit2, Save, X, Swords, Lock, Unlock, ShieldAlert, CheckCircle2, AlertTriangle } from 'lucide-react';
 import {
   TeamItem,
   fetchTeamsSafe,
@@ -20,6 +20,10 @@ export default function TeamsManager() {
   
   const [editingTeamKey, setEditingTeamKey] = useState<string | null>(null);
   const [editTeamName, setEditTeamName] = useState('');
+
+  const [deletingTeam, setDeletingTeam] = useState<TeamItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -119,20 +123,23 @@ export default function TeamsManager() {
     }
   };
 
-  const handleDeleteTeam = async (team: TeamItem) => {
-    const count = getMemberCount(team.name);
-    let confirmMsg = `Bạn có chắc chắn muốn xóa team "${team.name}"?`;
-    if (count > 0) {
-      confirmMsg = `CẢNH BÁO: Team "${team.name}" hiện đang có ${count} thành viên đã đăng ký!\nBạn có chắc chắn muốn xóa team này không?`;
-    }
+  const handleDeleteTeam = (team: TeamItem) => {
+    setDeletingTeam(team);
+  };
 
-    if (!window.confirm(confirmMsg)) return;
-
+  const handleConfirmDeleteTeam = async () => {
+    if (!deletingTeam) return;
+    setIsDeleting(true);
     try {
-      await deleteTeamSafe(team.id || team.name, team.name);
+      await deleteTeamSafe(deletingTeam.id || deletingTeam.name, deletingTeam.name);
       await loadData();
+      setFeedbackMsg({ type: 'success', text: `Đã xóa team "${deletingTeam.name}" thành công!` });
+      setDeletingTeam(null);
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      alert('Lỗi khi xóa team: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({ type: 'error', text: 'Lỗi khi xóa team: ' + (error?.message || 'Vui lòng thử lại') });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -155,6 +162,29 @@ export default function TeamsManager() {
           Tổng số: <span className="text-indigo-600">{teams.length}</span> Team
         </div>
       </div>
+
+      {feedbackMsg && (
+        <div className={`mb-6 p-4 rounded-2xl border text-sm flex items-center justify-between shadow-sm ${
+          feedbackMsg.type === 'success' 
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+            : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {feedbackMsg.type === 'success' ? (
+              <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle size={18} className="text-red-600 shrink-0" />
+            )}
+            <span className="font-medium">{feedbackMsg.text}</span>
+          </div>
+          <button 
+            onClick={() => setFeedbackMsg(null)}
+            className="text-zinc-400 hover:text-zinc-600 p-1 rounded-lg"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Add team form */}
       <form onSubmit={handleAddTeam} className="flex flex-col sm:flex-row gap-3 mb-8">
@@ -331,6 +361,61 @@ export default function TeamsManager() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Modal Xác nhận Xóa Team */}
+      {deletingTeam && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-zinc-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4 text-red-600">
+              <div className="p-3 bg-red-100 rounded-xl">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-zinc-900">Xác nhận xóa Team</h3>
+                <p className="text-xs text-zinc-500">Xóa team khỏi danh sách hệ thống</p>
+              </div>
+            </div>
+
+            <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-xs text-zinc-700 space-y-2 mb-6">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Tên Team:</span>
+                <strong className="text-zinc-900 text-sm">{deletingTeam.name}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Số thành viên đã đăng ký:</span>
+                <strong className={getMemberCount(deletingTeam.name) > 0 ? "text-amber-600" : "text-zinc-700"}>
+                  {getMemberCount(deletingTeam.name)} thành viên
+                </strong>
+              </div>
+              {getMemberCount(deletingTeam.name) > 0 && (
+                <div className="p-2.5 bg-amber-50 rounded-lg text-amber-800 text-[11px] font-medium border border-amber-200">
+                  ⚠️ Lưu ý: Team đang có thành viên đăng ký. Xóa team này sẽ khiến các thành viên hiển thị ở nhóm &quot;Khác&quot;.
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeletingTeam(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteTeam}
+                disabled={isDeleting}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                <span>{isDeleting ? 'Đang xóa...' : 'Xóa vĩnh viễn'}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

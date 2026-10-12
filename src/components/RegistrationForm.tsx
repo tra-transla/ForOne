@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Send, CheckCircle2, Users, Swords, ChevronDown, ChevronRight, Megaphone, Trophy, Lock, Unlock } from 'lucide-react';
+import { Send, CheckCircle2, Users, Swords, ChevronDown, ChevronRight, Megaphone, Trophy, Lock, Unlock, Trash2, X, AlertTriangle } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import {
   CampaignSettings,
   fetchCampaignSettings,
@@ -12,10 +13,12 @@ import {
   fetchTeamsSafe,
   fetchRegistrationsSafe,
   addRegistrationSafe,
+  deleteRegistrationSafe,
   fetchNewsSafe
 } from '../lib/schemaFallback';
 
 export default function RegistrationForm() {
+  const { user } = useAuth();
   const [formData, setFormData] = useState({
     team: '',
     inGameName: '',
@@ -31,6 +34,21 @@ export default function RegistrationForm() {
   const [news, setNews] = useState<any[]>([]);
   const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
   const [campaignSettings, setCampaignSettings] = useState<CampaignSettings>(getStoredCampaignSettings);
+  const [deletingMember, setDeletingMember] = useState<RegistrationItem | null>(null);
+  const [isDeletingMember, setIsDeletingMember] = useState(false);
+  const [memberFeedback, setMemberFeedback] = useState<string | null>(null);
+
+  const canManage = Boolean(
+    user && (
+      user.role === 'Quản trị' ||
+      user.role === 'Admin' ||
+      user.role === 'admin' ||
+      user.role === 'Điều hành' ||
+      user.role.toLowerCase().includes('quản') ||
+      user.role.toLowerCase().includes('admin') ||
+      user.role.toLowerCase().includes('điều')
+    )
+  );
 
   useEffect(() => {
     fetchRegistrations();
@@ -114,6 +132,27 @@ export default function RegistrationForm() {
       // safe fallback
     } finally {
       setLoadingRegistrations(false);
+    }
+  };
+
+  const handleConfirmDeleteMember = async () => {
+    if (!deletingMember) return;
+    setIsDeletingMember(true);
+    try {
+      await deleteRegistrationSafe(deletingMember.id, {
+        in_game_name: deletingMember.in_game_name,
+        team: deletingMember.team
+      });
+      setRegistrations(prev => prev.filter(r => String(r.id) !== String(deletingMember.id) && r.in_game_name !== deletingMember.in_game_name));
+      setMemberFeedback(`Đã xóa thành công thành viên "${deletingMember.in_game_name}"!`);
+      setDeletingMember(null);
+      setTimeout(() => setMemberFeedback(null), 4000);
+      fetchRegistrations();
+    } catch (err: any) {
+      setMemberFeedback('Lỗi khi xóa thành viên: ' + (err?.message || 'Vui lòng thử lại'));
+      setTimeout(() => setMemberFeedback(null), 4000);
+    } finally {
+      setIsDeletingMember(false);
     }
   };
 
@@ -508,7 +547,7 @@ export default function RegistrationForm() {
                                       Hãy là người đầu tiên đăng ký!
                                     </span>
                                   )}
-                                </div>
+                                 </div>
                               ) : (
                                 <ul className="space-y-3">
                                   {members.map((member, idx) => (
@@ -521,12 +560,27 @@ export default function RegistrationForm() {
                                           <span className="text-xs text-zinc-400 font-mono w-4">{idx + 1}.</span>
                                           <span className="font-semibold">{member.in_game_name}</span>
                                         </div>
-                                        {member.is_winner && (
-                                          <span className="inline-flex items-center gap-1 text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded font-medium border border-yellow-200">
-                                            <Trophy size={12} className="text-yellow-500 fill-yellow-500" />
-                                            Lấy xe
-                                          </span>
-                                        )}
+                                        <div className="flex items-center gap-2">
+                                          {member.is_winner && (
+                                            <span className="inline-flex items-center gap-1 text-xs text-yellow-600 bg-yellow-50 px-2 py-0.5 rounded font-medium border border-yellow-200">
+                                              <Trophy size={12} className="text-yellow-500 fill-yellow-500" />
+                                              Lấy xe
+                                            </span>
+                                          )}
+                                          {canManage && (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setDeletingMember(member);
+                                              }}
+                                              className="p-1 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                              title="Xóa thành viên khỏi danh sách"
+                                            >
+                                              <Trash2 size={13} />
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
                                       <div className="text-xs text-zinc-500 pl-6">
                                         <span className="font-medium text-zinc-700">Tanks:</span> {member.tanks}
@@ -569,7 +623,22 @@ export default function RegistrationForm() {
                               <ul className="space-y-3">
                                 {members.map((member, idx) => (
                                   <li key={member.id} className="text-sm border-b border-zinc-200/80 pb-2">
-                                    <div className="font-semibold text-zinc-900">{member.in_game_name}</div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="font-semibold text-zinc-900">{member.in_game_name}</div>
+                                      {canManage && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDeletingMember(member);
+                                          }}
+                                          className="p-1 text-zinc-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                          title="Xóa thành viên"
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      )}
+                                    </div>
                                     <div className="text-xs text-zinc-500">Tanks: {member.tanks}</div>
                                   </li>
                                 ))}
@@ -586,6 +655,66 @@ export default function RegistrationForm() {
           </div>
         </div>
       </div>
+
+      {/* Modal Xác nhận Xóa Thành viên */}
+      {deletingMember && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-zinc-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4 text-red-600">
+              <div className="p-3 bg-red-100 rounded-xl">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-zinc-900">Xác nhận xóa đăng ký</h3>
+                <p className="text-xs text-zinc-500">Xóa vĩnh viễn chiến binh khỏi hệ thống</p>
+              </div>
+            </div>
+
+            <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-xs text-zinc-700 space-y-2 mb-6">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Đội tuyển:</span>
+                <strong className="text-zinc-900">{deletingMember.team}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Nick in-game:</span>
+                <strong className="text-indigo-600 font-mono text-sm">{deletingMember.in_game_name}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Xe đăng ký:</span>
+                <strong className="text-zinc-900">{deletingMember.tanks}</strong>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeletingMember(null)}
+                disabled={isDeletingMember}
+                className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteMember}
+                disabled={isDeletingMember}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                <span>{isDeletingMember ? 'Đang xóa...' : 'Xóa vĩnh viễn'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Member feedback toast */}
+      {memberFeedback && (
+        <div className="fixed bottom-6 right-6 z-50 bg-zinc-900 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-2 text-sm border border-zinc-700 animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle2 size={18} className="text-emerald-400" />
+          <span>{memberFeedback}</span>
+        </div>
+      )}
     </div>
   );
 }

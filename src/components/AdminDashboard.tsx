@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Trash2, Search, Users, Shield, Save, X, Settings, UserCog, User, Swords, Megaphone, Trophy, Calendar, Database } from 'lucide-react';
+import { LogOut, Edit2, Trash2, Search, Users, Shield, Save, X, Settings, UserCog, User, Swords, Megaphone, Trophy, Calendar, Database, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { checkDatabaseStatus } from '../lib/cloudflareD1';
 import TeamsManager from './TeamsManager';
@@ -42,6 +42,10 @@ export default function AdminDashboard() {
   
   const [editingId, setEditingId] = useState<string | number | null>(null);
   const [editForm, setEditForm] = useState({ team: '', inGameName: '', tanks: '' });
+
+  const [deletingReg, setDeletingReg] = useState<Registration | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const [dbEngine, setDbEngine] = useState('SQLite');
 
@@ -147,20 +151,51 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleDelete = async (id: string | number) => {
-    if (!window.confirm('Bạn có chắc chắn muốn xóa đăng ký này?')) return;
+  const canManage = Boolean(
+    !user?.role ||
+    user.role === 'Quản trị' ||
+    user.role === 'Admin' ||
+    user.role === 'admin' ||
+    user.role === 'Điều hành' ||
+    user.role.toLowerCase().includes('quản') ||
+    user.role.toLowerCase().includes('admin') ||
+    user.role.toLowerCase().includes('điều')
+  );
 
-    if (user?.role !== 'Quản trị') {
-      alert('Chỉ Quản trị mới có quyền xóa');
+  const handleDeleteClick = (reg: Registration) => {
+    if (!canManage) {
+      setFeedbackMsg({ type: 'error', text: 'Chỉ Quản trị viên và Điều hành mới có quyền xóa đăng ký.' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
       return;
     }
+    setDeletingReg(reg);
+  };
 
-    const target = registrations.find(r => r.id === id);
+  const handleConfirmDelete = async () => {
+    if (!deletingReg) return;
+    setIsDeleting(true);
     try {
-      await deleteRegistrationSafe(id, { in_game_name: target?.in_game_name, team: target?.team });
-      setRegistrations(registrations.filter(reg => reg.id !== id));
+      await deleteRegistrationSafe(deletingReg.id, {
+        in_game_name: deletingReg.in_game_name,
+        team: deletingReg.team
+      });
+      // Immediately remove from local state
+      setRegistrations(prev => prev.filter(r => String(r.id) !== String(deletingReg.id) && r.in_game_name !== deletingReg.in_game_name));
+      setFeedbackMsg({
+        type: 'success',
+        text: `Đã xóa thành công đăng ký của chiến binh "${deletingReg.in_game_name}"!`
+      });
+      setDeletingReg(null);
+      setTimeout(() => setFeedbackMsg(null), 4000);
+      // Refresh to ensure database consistency
+      fetchRegistrations();
     } catch (error: any) {
-      alert('Lỗi khi xóa: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({
+        type: 'error',
+        text: 'Lỗi khi xóa đăng ký: ' + (error?.message || 'Vui lòng thử lại')
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -241,6 +276,30 @@ export default function AdminDashboard() {
           </button>
         </div>
 
+        {/* Feedback Notification Alert */}
+        {feedbackMsg && (
+          <div className={`mb-6 p-4 rounded-2xl border text-sm flex items-center justify-between shadow-sm ${
+            feedbackMsg.type === 'success' 
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+              : 'bg-red-50 border-red-200 text-red-800'
+          }`}>
+            <div className="flex items-center gap-2.5">
+              {feedbackMsg.type === 'success' ? (
+                <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+              ) : (
+                <AlertTriangle size={18} className="text-red-600 shrink-0" />
+              )}
+              <span className="font-medium">{feedbackMsg.text}</span>
+            </div>
+            <button 
+              onClick={() => setFeedbackMsg(null)}
+              className="text-zinc-400 hover:text-zinc-600 p-1 rounded-lg"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
         {/* Tabs */}
         <div className="flex gap-4 mb-8 border-b border-zinc-200 pb-px">
           <button
@@ -255,7 +314,7 @@ export default function AdminDashboard() {
             Đăng ký
           </button>
           
-          {user?.role === 'Quản trị' && (
+          {canManage && (
             <>
               <button
                 onClick={() => setActiveTab('teams')}
@@ -316,11 +375,11 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {activeTab === 'teams' && user?.role === 'Quản trị' && <TeamsManager />}
-        {activeTab === 'users' && user?.role === 'Quản trị' && <UsersManager />}
-        {activeTab === 'news' && user?.role === 'Quản trị' && <NewsManager />}
-        {activeTab === 'campaign' && user?.role === 'Quản trị' && <CampaignSettingsManager />}
-        {activeTab === 'database' && user?.role === 'Quản trị' && <DatabaseManager />}
+        {activeTab === 'teams' && canManage && <TeamsManager />}
+        {activeTab === 'users' && canManage && <UsersManager />}
+        {activeTab === 'news' && canManage && <NewsManager />}
+        {activeTab === 'campaign' && canManage && <CampaignSettingsManager />}
+        {activeTab === 'database' && canManage && <DatabaseManager />}
 
         {activeTab === 'registrations' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
@@ -470,11 +529,11 @@ export default function AdminDashboard() {
                                     <Edit2 size={16} />
                                     <span>Sửa</span>
                                   </button>
-                                  {user?.role === 'Quản trị' && (
+                                  {canManage && (
                                     <button 
-                                      onClick={() => handleDelete(reg.id)}
-                                      className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors font-medium"
-                                      title="Xóa"
+                                      onClick={() => handleDeleteClick(reg)}
+                                      className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors font-medium cursor-pointer"
+                                      title="Xóa đăng ký"
                                     >
                                       <Trash2 size={16} />
                                       <span>Xóa</span>
@@ -492,6 +551,58 @@ export default function AdminDashboard() {
               </div>
             </div>
           </motion.div>
+        )}
+
+        {/* Modal Xác nhận Xóa trong Giao diện (Không dùng window.confirm) */}
+        {deletingReg && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-zinc-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-3 mb-4 text-red-600">
+                <div className="p-3 bg-red-100 rounded-xl">
+                  <Trash2 size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-zinc-900">Xác nhận xóa đăng ký</h3>
+                  <p className="text-xs text-zinc-500">Dữ liệu sẽ được xóa hoàn toàn khỏi Database</p>
+                </div>
+              </div>
+
+              <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-xs text-zinc-700 space-y-2 mb-6">
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500 font-medium">Đội tuyển:</span>
+                  <strong className="text-zinc-900">{deletingReg.team}</strong>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500 font-medium">Nick in-game:</span>
+                  <strong className="text-indigo-600 font-mono text-sm">{deletingReg.in_game_name}</strong>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-500 font-medium">Xe đăng ký:</span>
+                  <strong className="text-zinc-900">{deletingReg.tanks}</strong>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeletingReg(null)}
+                  disabled={isDeleting}
+                  className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDelete}
+                  disabled={isDeleting}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Trash2 size={14} />
+                  <span>{isDeleting ? 'Đang xóa...' : 'Xóa vĩnh viễn'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </main>
     </div>

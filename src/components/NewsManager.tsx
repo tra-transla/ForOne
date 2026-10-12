@@ -13,6 +13,7 @@ export default function NewsManager() {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [isTableSupported, setIsTableSupported] = useState(true);
   
   const [isAdding, setIsAdding] = useState(false);
@@ -22,6 +23,9 @@ export default function NewsManager() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editContent, setEditContent] = useState('');
+
+  const [deletingNews, setDeletingNews] = useState<NewsItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     fetchNews();
@@ -65,15 +69,24 @@ export default function NewsManager() {
     }
   };
 
-  const handleDeleteNews = async (id: string) => {
-    if (!window.confirm('Bạn có chắc chắn muốn xóa tin tức này?')) return;
+  const handleDeleteNews = (item: NewsItem) => {
+    setDeletingNews(item);
+  };
 
+  const handleConfirmDeleteNews = async () => {
+    if (!deletingNews) return;
+    setIsDeleting(true);
     try {
       setError(null);
-      await deleteNewsSafe(id);
-      setNews(prev => prev.filter(n => n.id !== id));
+      await deleteNewsSafe(deletingNews.id);
+      setNews(prev => prev.filter(n => n.id !== deletingNews.id));
+      setFeedbackMsg(`Đã xóa tin tức "${deletingNews.title}" thành công!`);
+      setDeletingNews(null);
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (err: any) {
-      setError('Lỗi khi xóa tin tức');
+      setError('Lỗi khi xóa tin tức: ' + (err?.message || 'Vui lòng thử lại'));
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -227,9 +240,9 @@ export default function NewsManager() {
                           <Edit2 size={16} />
                         </button>
                         <button
-                          onClick={() => handleDeleteNews(item.id)}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                          title="Xóa"
+                          onClick={() => handleDeleteNews(item)}
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
+                          title="Xóa tin tức"
                         >
                           <Trash2 size={16} />
                         </button>
@@ -246,6 +259,50 @@ export default function NewsManager() {
           </div>
         )}
       </div>
+
+      {/* Modal Xác nhận Xóa Tin tức */}
+      {deletingNews && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-zinc-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4 text-red-600">
+              <div className="p-3 bg-red-100 rounded-xl">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-zinc-900">Xác nhận xóa tin tức</h3>
+                <p className="text-xs text-zinc-500">Xóa bài đăng tin tức khỏi trang chủ</p>
+              </div>
+            </div>
+
+            <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-xs text-zinc-700 space-y-2 mb-6">
+              <div>
+                <span className="text-zinc-500 font-medium">Tiêu đề:</span>
+                <strong className="text-zinc-900 block mt-0.5">{deletingNews.title}</strong>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeletingNews(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteNews}
+                disabled={isDeleting}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                <span>{isDeleting ? 'Đang xóa...' : 'Xóa vĩnh viễn'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

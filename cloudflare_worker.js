@@ -143,8 +143,14 @@ export default {
           return jsonResponse({ success: true });
         }
         if (method === 'DELETE') {
-          await db.prepare("DELETE FROM teams WHERE id = ?").bind(id).run();
-          return jsonResponse({ success: true });
+          const rawId = path.replace('/api/teams/', '');
+          const id = decodeURIComponent(rawId);
+          let body = {};
+          try { body = await request.json(); } catch {}
+          const teamName = body.name ? decodeURIComponent(body.name) : id;
+          await db.prepare("DELETE FROM teams WHERE id = ? OR name = ? OR id = ? OR name = ?")
+            .bind(id, id, teamName, teamName).run();
+          return jsonResponse({ success: true, message: "Đã xóa team thành công" });
         }
       }
 
@@ -166,7 +172,8 @@ export default {
       }
 
       if (path.startsWith('/api/registrations/')) {
-        const id = path.replace('/api/registrations/', '');
+        const rawId = path.replace('/api/registrations/', '');
+        const id = decodeURIComponent(rawId);
         if (method === 'PUT') {
           const body = await request.json();
           if (body.is_winner !== undefined) {
@@ -178,8 +185,18 @@ export default {
           return jsonResponse({ success: true });
         }
         if (method === 'DELETE') {
-          await db.prepare("DELETE FROM registrations WHERE id = ?").bind(id).run();
-          return jsonResponse({ success: true });
+          let body = {};
+          try { body = await request.json(); } catch {}
+          if (body.in_game_name && body.team) {
+            await db.prepare("DELETE FROM registrations WHERE id = ? OR in_game_name = ? OR (in_game_name = ? AND team = ?)")
+              .bind(id, body.in_game_name, body.in_game_name, body.team).run();
+          } else if (body.in_game_name) {
+            await db.prepare("DELETE FROM registrations WHERE id = ? OR in_game_name = ?")
+              .bind(id, body.in_game_name).run();
+          } else {
+            await db.prepare("DELETE FROM registrations WHERE id = ?").bind(id).run();
+          }
+          return jsonResponse({ success: true, message: "Đã xóa đăng ký thành công" });
         }
       }
 
@@ -195,6 +212,21 @@ export default {
           await db.prepare("INSERT INTO news (id, title, content, created_at) VALUES (?, ?, ?, datetime('now'))")
             .bind(id, body.title.trim(), body.content.trim()).run();
           return jsonResponse({ id, title: body.title, content: body.content }, 201);
+        }
+      }
+
+      if (path.startsWith('/api/news/')) {
+        const rawId = path.replace('/api/news/', '');
+        const id = decodeURIComponent(rawId);
+        if (method === 'PUT') {
+          const body = await request.json();
+          await db.prepare("UPDATE news SET title = ?, content = ? WHERE id = ?")
+            .bind(body.title.trim(), body.content.trim(), id).run();
+          return jsonResponse({ success: true });
+        }
+        if (method === 'DELETE') {
+          await db.prepare("DELETE FROM news WHERE id = ? OR title = ?").bind(id, id).run();
+          return jsonResponse({ success: true, message: "Đã xóa tin tức thành công" });
         }
       }
 
@@ -234,9 +266,40 @@ export default {
         });
       }
 
-      if (path === '/api/users' && method === 'GET') {
-        const { results } = await db.prepare("SELECT id, username, role, is_locked, created_at FROM users ORDER BY created_at ASC").all();
-        return jsonResponse(results || []);
+      if (path === '/api/users') {
+        if (method === 'GET') {
+          const { results } = await db.prepare("SELECT id, username, role, is_locked, created_at FROM users ORDER BY created_at ASC").all();
+          return jsonResponse(results || []);
+        }
+        if (method === 'POST') {
+          const body = await request.json();
+          const id = body.id || crypto.randomUUID();
+          await db.prepare("INSERT INTO users (id, username, password, role, is_locked, created_at) VALUES (?, ?, ?, ?, 0, datetime('now'))")
+            .bind(id, body.username.trim(), body.password, body.role || 'Quản trị').run();
+          return jsonResponse({ id, username: body.username, role: body.role, is_locked: false }, 201);
+        }
+      }
+
+      if (path.startsWith('/api/users/')) {
+        const rawId = path.replace('/api/users/', '');
+        const id = decodeURIComponent(rawId);
+        if (method === 'PUT') {
+          const body = await request.json();
+          if (body.is_locked !== undefined) {
+            await db.prepare("UPDATE users SET is_locked = ? WHERE id = ?").bind(body.is_locked ? 1 : 0, id).run();
+          } else if (body.password) {
+            await db.prepare("UPDATE users SET username = ?, password = ?, role = ? WHERE id = ?")
+              .bind(body.username, body.password, body.role, id).run();
+          } else {
+            await db.prepare("UPDATE users SET username = ?, role = ? WHERE id = ?")
+              .bind(body.username, body.role, id).run();
+          }
+          return jsonResponse({ success: true });
+        }
+        if (method === 'DELETE') {
+          await db.prepare("DELETE FROM users WHERE id = ? OR username = ?").bind(id, id).run();
+          return jsonResponse({ success: true, message: "Đã xóa người dùng thành công" });
+        }
       }
 
       // 8. Default Root HTML UI (Khi người dùng mở trực tiếp for1.sonlahome.workers.dev trên trình duyệt)

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Trash2, Plus, ShieldAlert, UserPlus, Edit2, Save, X, Lock, Unlock } from 'lucide-react';
+import { Trash2, Plus, ShieldAlert, UserPlus, Edit2, Save, X, Lock, Unlock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import {
   UserItem,
   fetchUsersSafe,
@@ -24,6 +24,10 @@ export default function UsersManager() {
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | number | null>(null);
   const [editForm, setEditForm] = useState({ username: '', password: '', role: '' });
+
+  const [deletingUser, setDeletingUser] = useState<User | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
     fetchUsers();
@@ -60,14 +64,23 @@ export default function UsersManager() {
     }
   };
 
-  const handleDeleteUser = async (id: string | number, username: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa người dùng "${username}"?`)) return;
+  const handleDeleteUser = (user: User) => {
+    setDeletingUser(user);
+  };
 
+  const handleConfirmDeleteUser = async () => {
+    if (!deletingUser) return;
+    setIsDeleting(true);
     try {
-      await deleteUserSafe(id);
-      setUsers(users.filter(u => u.id !== id));
+      await deleteUserSafe(deletingUser.id);
+      setUsers(prev => prev.filter(u => u.id !== deletingUser.id));
+      setFeedbackMsg({ type: 'success', text: `Đã xóa tài khoản "${deletingUser.username}" thành công!` });
+      setDeletingUser(null);
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      alert('Lỗi khi xóa người dùng: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({ type: 'error', text: 'Lỗi khi xóa người dùng: ' + (error?.message || 'Vui lòng thử lại') });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -125,6 +138,29 @@ export default function UsersManager() {
         </div>
         <h2 className="text-xl font-bold text-zinc-900">Quản lý Người dùng</h2>
       </div>
+
+      {feedbackMsg && (
+        <div className={`mb-6 p-4 rounded-2xl border text-sm flex items-center justify-between shadow-sm ${
+          feedbackMsg.type === 'success' 
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+            : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {feedbackMsg.type === 'success' ? (
+              <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle size={18} className="text-red-600 shrink-0" />
+            )}
+            <span className="font-medium">{feedbackMsg.text}</span>
+          </div>
+          <button 
+            onClick={() => setFeedbackMsg(null)}
+            className="text-zinc-400 hover:text-zinc-600 p-1 rounded-lg"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       <form onSubmit={handleAddUser} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <input
@@ -268,8 +304,8 @@ export default function UsersManager() {
                               <span className="hidden sm:inline">Sửa</span>
                             </button>
                             <button 
-                              onClick={() => handleDeleteUser(u.id, u.username)}
-                              className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors font-medium"
+                              onClick={() => handleDeleteUser(u)}
+                              className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg transition-colors font-medium cursor-pointer"
                               title="Xóa người dùng"
                             >
                               <Trash2 size={16} />
@@ -284,6 +320,56 @@ export default function UsersManager() {
               )}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Modal Xác nhận Xóa User */}
+      {deletingUser && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-zinc-200 max-w-md w-full p-6 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-4 text-red-600">
+              <div className="p-3 bg-red-100 rounded-xl">
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-zinc-900">Xác nhận xóa tài khoản</h3>
+                <p className="text-xs text-zinc-500">Xóa vĩnh viễn tài khoản quản trị</p>
+              </div>
+            </div>
+
+            <div className="bg-zinc-50 p-4 rounded-xl border border-zinc-200 text-xs text-zinc-700 space-y-2 mb-6">
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Tên đăng nhập:</span>
+                <strong className="text-zinc-900 text-sm font-mono">{deletingUser.username}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-zinc-500 font-medium">Vai trò:</span>
+                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700">
+                  {deletingUser.role}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setDeletingUser(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteUser}
+                disabled={isDeleting}
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 size={14} />
+                <span>{isDeleting ? 'Đang xóa...' : 'Xóa vĩnh viễn'}</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

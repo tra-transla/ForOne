@@ -108,9 +108,9 @@ export const DEFAULT_USERS: UserItem[] = [
 export function getLocalTeams(): TeamItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_TEAMS_KEY);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch {}
   return DEFAULT_TEAMS;
@@ -147,10 +147,8 @@ export async function fetchTeamsSafe(): Promise<{ data: TeamItem[]; isLockedColu
           ...t,
           is_locked: Boolean(t.is_locked)
         }));
-        if (data.length > 0) {
-          saveLocalTeams(data);
-          return { data, isLockedColumnSupported: true };
-        }
+        saveLocalTeams(data);
+        return { data, isLockedColumnSupported: true };
       }
     }
   } catch (err) {
@@ -219,7 +217,8 @@ export async function updateTeamSafe(idOrName: string, oldName: string, newName:
   saveLocalRegistrations(updatedRegs);
 
   try {
-    await fetch(`${getApiBaseUrl()}/api/teams/${idOrName}`, {
+    const encodedId = encodeURIComponent(idOrName);
+    await fetch(`${getApiBaseUrl()}/api/teams/${encodedId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: trimmedNew })
@@ -238,9 +237,33 @@ export async function deleteTeamSafe(idOrName: string, teamName: string): Promis
   const updatedTeams = currentTeams.filter(t => t.id !== idOrName && t.name !== teamName && t.name !== idOrName);
   saveLocalTeams(updatedTeams);
 
+  const encodedId = encodeURIComponent(idOrName);
+  const baseUrl = getApiBaseUrl();
+
   try {
-    await fetch(`${getApiBaseUrl()}/api/teams/${idOrName}`, { method: 'DELETE' });
+    const res = await fetch(`${baseUrl}/api/teams/${encodedId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: teamName })
+    });
+
+    if (!res.ok && baseUrl) {
+      await fetch(`/api/teams/${encodedId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: teamName })
+      });
+    }
   } catch (err: any) {
+    if (baseUrl) {
+      try {
+        await fetch(`/api/teams/${encodedId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: teamName })
+        });
+      } catch {}
+    }
     console.warn('deleteTeam API error:', err);
   }
 
@@ -379,12 +402,48 @@ export async function deleteRegistrationSafe(
   fallbackInfo?: { in_game_name?: string; team?: string }
 ): Promise<{ success: boolean; error?: string }> {
   const currentRegs = getLocalRegistrations();
-  const updated = currentRegs.filter(r => String(r.id) !== String(id) && (!fallbackInfo?.in_game_name || r.in_game_name !== fallbackInfo.in_game_name));
+  const updated = currentRegs.filter(r => 
+    String(r.id) !== String(id) && 
+    (!fallbackInfo?.in_game_name || r.in_game_name !== fallbackInfo.in_game_name)
+  );
   saveLocalRegistrations(updated);
 
+  const encodedId = encodeURIComponent(String(id));
+  const baseUrl = getApiBaseUrl();
+
   try {
-    await fetch(`${getApiBaseUrl()}/api/registrations/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${baseUrl}/api/registrations/${encodedId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        in_game_name: fallbackInfo?.in_game_name,
+        team: fallbackInfo?.team
+      })
+    });
+    if (!res.ok && baseUrl) {
+      // Fallback to local server
+      await fetch(`/api/registrations/${encodedId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          in_game_name: fallbackInfo?.in_game_name,
+          team: fallbackInfo?.team
+        })
+      });
+    }
   } catch (err: any) {
+    if (baseUrl) {
+      try {
+        await fetch(`/api/registrations/${encodedId}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            in_game_name: fallbackInfo?.in_game_name,
+            team: fallbackInfo?.team
+          })
+        });
+      } catch {}
+    }
     console.warn('deleteRegistration API error:', err);
   }
 
@@ -422,9 +481,9 @@ export async function toggleWinnerSafe(
 export function getLocalNews(): NewsItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_NEWS_KEY);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch {}
   return DEFAULT_NEWS;
@@ -441,7 +500,7 @@ export async function fetchNewsSafe(): Promise<{ data: NewsItem[]; isTableSuppor
     const res = await fetch(`${getApiBaseUrl()}/api/news`);
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         saveLocalNews(data);
         return { data, isTableSupported: true };
       }
@@ -489,7 +548,8 @@ export async function updateNewsSafe(id: string, title: string, content: string)
   saveLocalNews(updated);
 
   try {
-    await fetch(`${getApiBaseUrl()}/api/news/${id}`, {
+    const encodedId = encodeURIComponent(id);
+    await fetch(`${getApiBaseUrl()}/api/news/${encodedId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, content })
@@ -507,9 +567,20 @@ export async function deleteNewsSafe(id: string): Promise<{ success: boolean; er
   const updated = currentNews.filter(n => n.id !== id);
   saveLocalNews(updated);
 
+  const encodedId = encodeURIComponent(id);
+  const baseUrl = getApiBaseUrl();
+
   try {
-    await fetch(`${getApiBaseUrl()}/api/news/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${baseUrl}/api/news/${encodedId}`, { method: 'DELETE' });
+    if (!res.ok && baseUrl) {
+      await fetch(`/api/news/${encodedId}`, { method: 'DELETE' });
+    }
   } catch (err: any) {
+    if (baseUrl) {
+      try {
+        await fetch(`/api/news/${encodedId}`, { method: 'DELETE' });
+      } catch {}
+    }
     console.warn('deleteNews API error:', err);
   }
 
@@ -524,9 +595,9 @@ export async function deleteNewsSafe(id: string): Promise<{ success: boolean; er
 export function getLocalUsers(): UserItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_USERS_KEY);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch {}
   return DEFAULT_USERS;
@@ -543,7 +614,7 @@ export async function fetchUsersSafe(): Promise<UserItem[]> {
     const res = await fetch(`${getApiBaseUrl()}/api/users`);
     if (res.ok) {
       const raw = await res.json();
-      if (Array.isArray(raw) && raw.length > 0) {
+      if (Array.isArray(raw)) {
         const data = raw.map(u => ({ ...u, is_locked: Boolean(u.is_locked) }));
         saveLocalUsers(data);
         return data;
@@ -591,7 +662,8 @@ export async function updateUserSafe(id: string | number, data: Partial<UserItem
   saveLocalUsers(updated);
 
   try {
-    await fetch(`${getApiBaseUrl()}/api/users/${id}`, {
+    const encodedId = encodeURIComponent(String(id));
+    await fetch(`${getApiBaseUrl()}/api/users/${encodedId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -608,9 +680,20 @@ export async function deleteUserSafe(id: string | number): Promise<{ success: bo
   const updated = currentUsers.filter(u => String(u.id) !== String(id));
   saveLocalUsers(updated);
 
+  const encodedId = encodeURIComponent(String(id));
+  const baseUrl = getApiBaseUrl();
+
   try {
-    await fetch(`${getApiBaseUrl()}/api/users/${id}`, { method: 'DELETE' });
+    const res = await fetch(`${baseUrl}/api/users/${encodedId}`, { method: 'DELETE' });
+    if (!res.ok && baseUrl) {
+      await fetch(`/api/users/${encodedId}`, { method: 'DELETE' });
+    }
   } catch (err: any) {
+    if (baseUrl) {
+      try {
+        await fetch(`/api/users/${encodedId}`, { method: 'DELETE' });
+      } catch {}
+    }
     console.warn('deleteUser API error:', err);
   }
 

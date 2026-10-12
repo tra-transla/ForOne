@@ -435,10 +435,18 @@ app.put('/api/teams/:id', async (req, res) => {
 });
 
 app.delete('/api/teams/:id', async (req, res) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = decodeURIComponent(rawId);
+  const { name } = req.body || {};
+  const teamName = name ? decodeURIComponent(name) : id;
+
   try {
-    await executeDb('DELETE FROM teams WHERE id = ?', [id]);
-    res.json({ success: true });
+    await executeDb('DELETE FROM teams WHERE id = ? OR name = ? OR id = ? OR name = ?', [id, id, teamName, teamName]);
+    try {
+      const localDb = getLocalSqlite();
+      localDb.prepare('DELETE FROM teams WHERE id = ? OR name = ? OR id = ? OR name = ?').run(id, id, teamName, teamName);
+    } catch {}
+    res.json({ success: true, message: 'Đã xóa team thành công' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -477,7 +485,8 @@ app.post('/api/register', async (req, res) => {
 });
 
 app.put('/api/registrations/:id', async (req, res) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = decodeURIComponent(rawId);
   const { team, in_game_name, tanks, is_winner } = req.body;
   try {
     if (is_winner !== undefined) {
@@ -495,10 +504,31 @@ app.put('/api/registrations/:id', async (req, res) => {
 });
 
 app.delete('/api/registrations/:id', async (req, res) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = decodeURIComponent(rawId);
+  const { in_game_name, team } = req.body || {};
+
   try {
-    await executeDb('DELETE FROM registrations WHERE id = ?', [id]);
-    res.json({ success: true });
+    let sql = 'DELETE FROM registrations WHERE id = ?';
+    let params: any[] = [id];
+
+    if (in_game_name && team) {
+      sql = 'DELETE FROM registrations WHERE id = ? OR in_game_name = ? OR (in_game_name = ? AND team = ?)';
+      params = [id, in_game_name, in_game_name, team];
+    } else if (in_game_name) {
+      sql = 'DELETE FROM registrations WHERE id = ? OR in_game_name = ?';
+      params = [id, in_game_name];
+    }
+
+    await executeDb(sql, params);
+
+    // Also delete from local SQLite to ensure complete sync
+    try {
+      const localDb = getLocalSqlite();
+      localDb.prepare(sql).run(...params);
+    } catch {}
+
+    res.json({ success: true, message: 'Đã xóa đăng ký thành công' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -548,10 +578,15 @@ app.put('/api/users/:id', async (req, res) => {
 });
 
 app.delete('/api/users/:id', async (req, res) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = decodeURIComponent(rawId);
   try {
-    await executeDb('DELETE FROM users WHERE id = ?', [id]);
-    res.json({ success: true });
+    await executeDb('DELETE FROM users WHERE id = ? OR username = ?', [id, id]);
+    try {
+      const localDb = getLocalSqlite();
+      localDb.prepare('DELETE FROM users WHERE id = ? OR username = ?').run(id, id);
+    } catch {}
+    res.json({ success: true, message: 'Đã xóa người dùng thành công' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -583,7 +618,8 @@ app.post('/api/news', async (req, res) => {
 });
 
 app.put('/api/news/:id', async (req, res) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = decodeURIComponent(rawId);
   const { title, content } = req.body;
   try {
     await executeDb('UPDATE news SET title = ?, content = ? WHERE id = ?', [title.trim(), content.trim(), id]);
@@ -594,10 +630,15 @@ app.put('/api/news/:id', async (req, res) => {
 });
 
 app.delete('/api/news/:id', async (req, res) => {
-  const { id } = req.params;
+  const rawId = req.params.id;
+  const id = decodeURIComponent(rawId);
   try {
-    await executeDb('DELETE FROM news WHERE id = ?', [id]);
-    res.json({ success: true });
+    await executeDb('DELETE FROM news WHERE id = ? OR title = ?', [id, id]);
+    try {
+      const localDb = getLocalSqlite();
+      localDb.prepare('DELETE FROM news WHERE id = ? OR title = ?').run(id, id);
+    } catch {}
+    res.json({ success: true, message: 'Đã xóa tin tức thành công' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

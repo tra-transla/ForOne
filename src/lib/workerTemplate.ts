@@ -172,7 +172,14 @@ export default {
           return jsonResponse({ success: true });
         }
         if (method === 'DELETE') {
-          await db.prepare("DELETE FROM registrations WHERE id = ?").bind(id).run();
+          let body = {};
+          try { body = await request.json(); } catch {}
+          if (body.in_game_name && body.team) {
+            await db.prepare("DELETE FROM registrations WHERE id = ? OR (in_game_name = ? AND team = ?)")
+              .bind(id, body.in_game_name, body.team).run();
+          } else {
+            await db.prepare("DELETE FROM registrations WHERE id = ?").bind(id).run();
+          }
           return jsonResponse({ success: true });
         }
       }
