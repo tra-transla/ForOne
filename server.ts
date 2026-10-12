@@ -27,7 +27,7 @@ function runAsync(fn: () => Promise<any>) {
 const CONFIG_PATH = path.join(process.cwd(), 'supabase_config.json');
 const DEFAULT_URL = 'https://czlmqxfxfbrwzmshespi.supabase.co';
 const DEFAULT_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6bG1xeGZ4ZmJyd3ptc2hlc3BpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM1OTE2MDUsImV4cCI6MjA1OTE2NzYwNX0.CvsY3d0pVwYdm7ZxiyUPFsByNj35U49fhdfytOh44ww';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6bG1xeGZ4ZmJyd3ptc2hlc3BpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE4MDAyNTMsImV4cCI6MjEwNzM3NjI1M30.CvsY3d0pVwYdm7ZxiyUPfSByNj35U49fhdfytOh44ww';
 
 function getServerSupabaseConfig() {
   let fileUrl = '';

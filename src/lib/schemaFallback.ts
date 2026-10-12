@@ -66,13 +66,13 @@ export const DEFAULT_NEWS: NewsItem[] = [
   {
     id: '52d95507-e7a3-4f92-8721-70107c643e18',
     title: 'Thông báo: Khởi động sự kiện Campaign 2026',
-    content: 'Chào mừng chiến binh tham gia chiến dịch Spring Maneuvers 2026! Thời gian diễn ra từ 23/03/2026 đến 06/04/2026. Đội vui lòng kiểm tra danh sách thành viên và chuẩn bị phương tiện tác chiến.',
+    content: 'Chào mừng các chiến binh tham gia chiến dịch Spring Maneuvers 2026! Thời gian diễn ra từ 23/03/2026 đến 06/04/2026. Các đội vui lòng kiểm tra danh sách thành viên và chuẩn bị phương tiện tác chiến.',
     created_at: '2026-03-20T08:00:00Z'
   },
   {
     id: 'c6df86f3-ec10-4f2c-aacf-7bc9aa1c546c',
     title: 'Quy định đăng ký & Chốt danh sách',
-    content: 'Mỗi chiến binh đăng ký với tên In-Game chính xác và xe sử dụng. Khi đội tuyển được Ban Quản Trị / Điều Hành chốt danh sách, thành viên mới sẽ không thể đăng ký thêm vào đội đó.',
+    content: 'Mỗi chiến binh đăng ký với tên In-Game chính xác và các xe sử dụng. Khi đội tuyển được Ban Quản Trị / Điều Hành chốt danh sách, thành viên mới sẽ không thể đăng ký thêm vào đội đó.',
     created_at: '2026-03-21T09:30:00Z'
   }
 ];
@@ -141,15 +141,24 @@ export async function fetchTeamsSafe(): Promise<{ data: TeamItem[]; isLockedColu
   // 1. Primary: Supabase Cloud Database
   try {
     const { data, error } = await supabase.from('teams').select('*').order('created_at', { ascending: true });
-    if (!error && Array.isArray(data) && data.length > 0) {
-      const mapped = data.map(t => ({
-        id: t.id,
-        name: t.name,
-        is_locked: Boolean(t.is_locked),
-        created_at: t.created_at
-      }));
-      saveLocalTeams(mapped);
-      return { data: mapped, isLockedColumnSupported: true };
+    if (!error && Array.isArray(data)) {
+      if (data.length > 0) {
+        const mapped = data.map(t => ({
+          id: t.id,
+          name: t.name,
+          is_locked: Boolean(t.is_locked),
+          created_at: t.created_at
+        }));
+        saveLocalTeams(mapped);
+        return { data: mapped, isLockedColumnSupported: true };
+      } else {
+        // Auto-seed Supabase if table exists but is empty
+        try {
+          await supabase.from('teams').upsert(DEFAULT_TEAMS.map(t => ({ id: t.id, name: t.name, is_locked: false, created_at: t.created_at })), { onConflict: 'name' });
+        } catch {}
+        saveLocalTeams(DEFAULT_TEAMS);
+        return { data: DEFAULT_TEAMS, isLockedColumnSupported: true };
+      }
     }
   } catch (err) {
     console.warn('Supabase fetchTeams error, using local fallback:', err);
@@ -583,9 +592,17 @@ export async function fetchNewsSafe(): Promise<{ data: NewsItem[]; isTableSuppor
   // 1. Primary: Supabase Cloud Database
   try {
     const { data, error } = await supabase.from('news').select('*').order('created_at', { ascending: false });
-    if (!error && Array.isArray(data) && data.length > 0) {
-      saveLocalNews(data);
-      return { data, isTableSupported: true };
+    if (!error && Array.isArray(data)) {
+      if (data.length > 0) {
+        saveLocalNews(data);
+        return { data, isTableSupported: true };
+      } else {
+        try {
+          await supabase.from('news').upsert(DEFAULT_NEWS, { onConflict: 'id' });
+        } catch {}
+        saveLocalNews(DEFAULT_NEWS);
+        return { data: DEFAULT_NEWS, isTableSupported: true };
+      }
     }
   } catch (err) {
     console.warn('Supabase fetchNews error:', err);
@@ -720,16 +737,24 @@ export async function fetchUsersSafe(): Promise<UserItem[]> {
   // 1. Primary: Supabase Cloud Database
   try {
     const { data, error } = await supabase.from('users').select('*').order('created_at', { ascending: true });
-    if (!error && Array.isArray(data) && data.length > 0) {
-      const mapped = data.map(u => ({
-        id: u.id,
-        username: u.username,
-        password: u.password,
-        role: u.role || 'Quản trị',
-        is_locked: Boolean(u.is_locked)
-      }));
-      saveLocalUsers(mapped);
-      return mapped;
+    if (!error && Array.isArray(data)) {
+      if (data.length > 0) {
+        const mapped = data.map(u => ({
+          id: u.id,
+          username: u.username,
+          password: u.password,
+          role: u.role || 'Quản trị',
+          is_locked: Boolean(u.is_locked)
+        }));
+        saveLocalUsers(mapped);
+        return mapped;
+      } else {
+        try {
+          await supabase.from('users').upsert(DEFAULT_USERS, { onConflict: 'username' });
+        } catch {}
+        saveLocalUsers(DEFAULT_USERS);
+        return DEFAULT_USERS;
+      }
     }
   } catch (err) {
     console.warn('Supabase fetchUsers error:', err);

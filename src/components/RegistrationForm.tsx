@@ -70,10 +70,17 @@ export default function RegistrationForm() {
     const handleRegistrationsUpdate = () => fetchRegistrations();
     const handleNewsUpdate = () => fetchNews();
 
+    const handleSupabaseConfigUpdate = () => {
+      fetchTeams();
+      fetchRegistrations();
+      fetchNews();
+    };
+
     window.addEventListener('campaign_settings_updated', handleSettingsUpdate);
     window.addEventListener('teams_updated', handleTeamsUpdate);
     window.addEventListener('registrations_updated', handleRegistrationsUpdate);
     window.addEventListener('news_updated', handleNewsUpdate);
+    window.addEventListener('supabase_config_updated', handleSupabaseConfigUpdate);
 
     // Polling interval to keep data synchronized
     const interval = setInterval(() => {
@@ -87,6 +94,7 @@ export default function RegistrationForm() {
       window.removeEventListener('teams_updated', handleTeamsUpdate);
       window.removeEventListener('registrations_updated', handleRegistrationsUpdate);
       window.removeEventListener('news_updated', handleNewsUpdate);
+      window.removeEventListener('supabase_config_updated', handleSupabaseConfigUpdate);
     };
   }, []);
 
@@ -322,12 +330,12 @@ export default function RegistrationForm() {
 
                 <div>
                   <label className="block text-sm font-medium text-zinc-700 mb-2">
-                    Tanks (Xe tăng sử dụng) <span className="text-red-500">*</span>
+                    Tanks (Các xe tăng sử dụng) <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     value={formData.tanks}
                     onChange={(e) => setFormData({ ...formData, tanks: e.target.value })}
-                    placeholder="Liệt kê xe tăng bạn sẽ sử dụng..."
+                    placeholder="Liệt kê các xe tăng bạn sẽ sử dụng..."
                     rows={3}
                     className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-zinc-900 focus:border-zinc-900 outline-none transition-all resize-none text-sm"
                     required
@@ -436,7 +444,7 @@ export default function RegistrationForm() {
                       listTab === 'all' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
                     }`}
                   >
-                    Danh sách Team ({teams.length})
+                    Danh sách các Team ({teams.length})
                   </button>
                 </div>
               </div>

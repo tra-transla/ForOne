@@ -34,7 +34,11 @@ export default function NewsManager() {
       fetchNews();
     };
     window.addEventListener('news_updated', handleNewsUpdate);
-    return () => window.removeEventListener('news_updated', handleNewsUpdate);
+    window.addEventListener('supabase_config_updated', handleNewsUpdate);
+    return () => {
+      window.removeEventListener('news_updated', handleNewsUpdate);
+      window.removeEventListener('supabase_config_updated', handleNewsUpdate);
+    };
   }, []);
 
   const fetchNews = async () => {

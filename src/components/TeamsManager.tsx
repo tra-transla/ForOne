@@ -30,13 +30,16 @@ export default function TeamsManager() {
 
     const handleTeamsUpdate = () => loadData();
     const handleRegsUpdate = () => loadRegistrations();
+    const handleConfigUpdate = () => loadData();
 
     window.addEventListener('teams_updated', handleTeamsUpdate);
     window.addEventListener('registrations_updated', handleRegsUpdate);
+    window.addEventListener('supabase_config_updated', handleConfigUpdate);
 
     return () => {
       window.removeEventListener('teams_updated', handleTeamsUpdate);
       window.removeEventListener('registrations_updated', handleRegsUpdate);
+      window.removeEventListener('supabase_config_updated', handleConfigUpdate);
     };
   }, []);
 
@@ -161,7 +164,7 @@ export default function TeamsManager() {
           <div>
             <h2 className="text-xl font-bold text-zinc-900">Quản lý Team</h2>
             <p className="text-sm text-zinc-500">
-              Thêm, sửa tên, xóa team và chốt danh sách đăng ký. Danh sách ngoài trang chủ sẽ hiển thị theo team tại đây.
+              Thêm, sửa tên, xóa team và chốt danh sách đăng ký. Danh sách ngoài trang chủ sẽ hiển thị theo các team tại đây.
             </p>
           </div>
         </div>
@@ -267,7 +270,7 @@ export default function TeamsManager() {
                               />
                             </div>
                             <p className="text-xs text-amber-600 mt-1">
-                              * Đổi tên team sẽ tự động đồng bộ tên mới cho tất cả thành viên đã đăng ký.
+                              * Đổi tên team sẽ tự động đồng bộ tên mới cho tất cả các thành viên đã đăng ký.
                             </p>
                           </td>
                           <td className="px-6 py-4 text-right">
@@ -399,7 +402,7 @@ export default function TeamsManager() {
               </div>
               {getMemberCount(deletingTeam.name) > 0 && (
                 <div className="p-2.5 bg-amber-50 rounded-lg text-amber-800 text-[11px] font-medium border border-amber-200">
-                  ⚠️ Lưu ý: Team đang có thành viên đăng ký. Xóa team này sẽ khiến thành viên hiển thị ở nhóm &quot;Khác&quot;.
+                  ⚠️ Lưu ý: Team đang có thành viên đăng ký. Xóa team này sẽ khiến các thành viên hiển thị ở nhóm &quot;Khác&quot;.
                 </div>
               )}
             </div>

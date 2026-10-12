@@ -31,6 +31,15 @@ export default function UsersManager() {
 
   useEffect(() => {
     fetchUsers();
+
+    const handleUsersUpdate = () => fetchUsers();
+    window.addEventListener('users_updated', handleUsersUpdate);
+    window.addEventListener('supabase_config_updated', handleUsersUpdate);
+
+    return () => {
+      window.removeEventListener('users_updated', handleUsersUpdate);
+      window.removeEventListener('supabase_config_updated', handleUsersUpdate);
+    };
   }, []);
 
   const fetchUsers = async () => {
