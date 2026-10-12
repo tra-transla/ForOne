@@ -25,6 +25,29 @@ export interface CloudflareDiagnosticResult {
   };
 }
 
+export function getStoredWorkerUrl(): string {
+  try {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('cf_worker_url') || '';
+    }
+  } catch {}
+  return '';
+}
+
+export function saveStoredWorkerUrl(url: string) {
+  try {
+    if (typeof window !== 'undefined') {
+      if (url && url.trim()) localStorage.setItem('cf_worker_url', url.trim().replace(/\/+$/, ''));
+      else localStorage.removeItem('cf_worker_url');
+    }
+  } catch {}
+}
+
+export function getApiBaseUrl(): string {
+  const custom = getStoredWorkerUrl();
+  return custom ? custom : '';
+}
+
 export function getStoredCloudflareConfig(): CloudflareD1Config {
   try {
     if (typeof window !== 'undefined') {
@@ -58,6 +81,7 @@ export function clearStoredCloudflareConfig() {
       localStorage.removeItem('cf_account_id');
       localStorage.removeItem('cf_d1_database_id');
       localStorage.removeItem('cf_api_token');
+      localStorage.removeItem('cf_worker_url');
     }
   } catch {}
 }

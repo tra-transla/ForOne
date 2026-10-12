@@ -152,7 +152,7 @@ export default function RegistrationForm() {
   };
 
   // Filter winners for Results tab
-  const winnerRegistrations = registrations.filter(reg => reg.is_winner);
+  const winnerRegistrations = registrations.filter(reg => Boolean(reg.is_winner));
 
   // Group registrations by team
   const registrationsByTeamName = registrations.reduce((acc, reg) => {
@@ -253,14 +253,14 @@ export default function RegistrationForm() {
                         <option 
                           key={team.id || team.name} 
                           value={team.name}
-                          disabled={team.is_locked}
+                          disabled={Boolean(team.is_locked)}
                         >
-                          {team.name} {team.is_locked ? '🔒 (Đã chốt danh sách)' : ''}
+                          {team.name} {Boolean(team.is_locked) ? '🔒 (Đã chốt danh sách)' : ''}
                         </option>
                       ))}
                     </select>
                   )}
-                  {teams.find(t => t.name === formData.team)?.is_locked && (
+                  {Boolean(teams.find(t => t.name === formData.team)?.is_locked) && (
                     <p className="text-xs text-amber-600 mt-1.5 flex items-center gap-1 font-medium">
                       <Lock size={12} /> Team này đã chốt danh sách. Vui lòng chọn team khác.
                     </p>

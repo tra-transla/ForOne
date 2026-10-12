@@ -1,4 +1,4 @@
-import { syncToCloudflareDb } from './cloudflareD1';
+import { syncToCloudflareDb, getApiBaseUrl } from './cloudflareD1';
 
 export interface NewsItem {
   id: string;
@@ -139,12 +139,18 @@ export function saveLocalLockedTeams(teams: string[]) {
 
 export async function fetchTeamsSafe(): Promise<{ data: TeamItem[]; isLockedColumnSupported: boolean }> {
   try {
-    const res = await fetch('/api/teams');
+    const res = await fetch(`${getApiBaseUrl()}/api/teams`);
     if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
-        saveLocalTeams(data);
-        return { data, isLockedColumnSupported: true };
+      const raw = await res.json();
+      if (Array.isArray(raw)) {
+        const data = raw.map(t => ({
+          ...t,
+          is_locked: Boolean(t.is_locked)
+        }));
+        if (data.length > 0) {
+          saveLocalTeams(data);
+          return { data, isLockedColumnSupported: true };
+        }
       }
     }
   } catch (err) {
@@ -156,7 +162,7 @@ export async function fetchTeamsSafe(): Promise<{ data: TeamItem[]; isLockedColu
   return {
     data: localTeams.map(t => ({
       ...t,
-      is_locked: t.is_locked !== undefined ? t.is_locked : localLocked.includes(t.name)
+      is_locked: t.is_locked !== undefined ? Boolean(t.is_locked) : localLocked.includes(t.name)
     })),
     isLockedColumnSupported: true
   };
@@ -174,14 +180,14 @@ export async function addTeamSafe(name: string): Promise<{ team: TeamItem; error
   };
 
   try {
-    const res = await fetch('/api/teams', {
+    const res = await fetch(`${getApiBaseUrl()}/api/teams`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: teamId, name: trimmed, is_locked: false })
     });
     if (res.ok) {
       const data = await res.json();
-      const updated = [...currentTeams.filter(t => t.id !== data.id && t.name !== data.name), data];
+      const updated = [...currentTeams.filter(t => t.id !== data.id && t.name !== data.name), { ...data, is_locked: Boolean(data.is_locked) }];
       saveLocalTeams(updated);
       window.dispatchEvent(new CustomEvent('teams_updated'));
       return { team: data };
@@ -213,7 +219,7 @@ export async function updateTeamSafe(idOrName: string, oldName: string, newName:
   saveLocalRegistrations(updatedRegs);
 
   try {
-    await fetch(`/api/teams/${idOrName}`, {
+    await fetch(`${getApiBaseUrl()}/api/teams/${idOrName}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: trimmedNew })
@@ -233,7 +239,7 @@ export async function deleteTeamSafe(idOrName: string, teamName: string): Promis
   saveLocalTeams(updatedTeams);
 
   try {
-    await fetch(`/api/teams/${idOrName}`, { method: 'DELETE' });
+    await fetch(`${getApiBaseUrl()}/api/teams/${idOrName}`, { method: 'DELETE' });
   } catch (err: any) {
     console.warn('deleteTeam API error:', err);
   }
@@ -248,7 +254,7 @@ export async function toggleTeamLockSafe(team: TeamItem): Promise<boolean> {
   saveLocalTeams(currentTeams.map(t => ((t.name === team.name || t.id === team.id) ? { ...t, is_locked: newLocked } : t)));
 
   try {
-    await fetch(`/api/teams/${team.id}`, {
+    await fetch(`${getApiBaseUrl()}/api/teams/${team.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_locked: newLocked })
@@ -284,10 +290,14 @@ export function saveLocalRegistrations(regs: RegistrationItem[]) {
 
 export async function fetchRegistrationsSafe(): Promise<{ data: RegistrationItem[] }> {
   try {
-    const res = await fetch('/api/registrations');
+    const res = await fetch(`${getApiBaseUrl()}/api/registrations`);
     if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data)) {
+      const raw = await res.json();
+      if (Array.isArray(raw)) {
+        const data = raw.map(r => ({
+          ...r,
+          is_winner: Boolean(r.is_winner)
+        }));
         saveLocalRegistrations(data);
         return { data };
       }
@@ -301,28 +311,30 @@ export async function fetchRegistrationsSafe(): Promise<{ data: RegistrationItem
 
 export async function addRegistrationSafe(reg: {
   team: string;
-  inGameName: string;
+  inGameName?: string;
+  in_game_name?: string;
   tanks: string;
 }): Promise<{ registration: RegistrationItem; error?: string }> {
   const currentRegs = getLocalRegistrations();
   const newId = generateClientUuid();
+  const inGameName = reg.inGameName || reg.in_game_name || '';
   const newReg: RegistrationItem = {
     id: newId,
     team: reg.team,
-    in_game_name: reg.inGameName,
+    in_game_name: inGameName,
     tanks: reg.tanks,
     created_at: new Date().toISOString(),
     is_winner: false
   };
 
   try {
-    const res = await fetch('/api/register', {
+    const res = await fetch(`${getApiBaseUrl()}/api/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: newId,
         team: reg.team,
-        inGameName: reg.inGameName,
+        inGameName: inGameName,
         tanks: reg.tanks
       })
     });
@@ -349,7 +361,7 @@ export async function updateRegistrationSafe(
   saveLocalRegistrations(updated);
 
   try {
-    await fetch(`/api/registrations/${id}`, {
+    await fetch(`${getApiBaseUrl()}/api/registrations/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedData)
@@ -364,14 +376,14 @@ export async function updateRegistrationSafe(
 
 export async function deleteRegistrationSafe(
   id: string | number,
-  fallbackInfo?: { in_game_name: string }
+  fallbackInfo?: { in_game_name?: string; team?: string }
 ): Promise<{ success: boolean; error?: string }> {
   const currentRegs = getLocalRegistrations();
-  const updated = currentRegs.filter(r => String(r.id) !== String(id) && (!fallbackInfo || r.in_game_name !== fallbackInfo.in_game_name));
+  const updated = currentRegs.filter(r => String(r.id) !== String(id) && (!fallbackInfo?.in_game_name || r.in_game_name !== fallbackInfo.in_game_name));
   saveLocalRegistrations(updated);
 
   try {
-    await fetch(`/api/registrations/${id}`, { method: 'DELETE' });
+    await fetch(`${getApiBaseUrl()}/api/registrations/${id}`, { method: 'DELETE' });
   } catch (err: any) {
     console.warn('deleteRegistration API error:', err);
   }
@@ -390,7 +402,7 @@ export async function toggleWinnerSafe(
   saveLocalRegistrations(currentRegs.map(r => (String(r.id) === String(id) || (fallbackInGameName && r.in_game_name === fallbackInGameName) ? { ...r, is_winner: newStatus } : r)));
 
   try {
-    await fetch(`/api/registrations/${id}`, {
+    await fetch(`${getApiBaseUrl()}/api/registrations/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_winner: newStatus })
@@ -426,7 +438,7 @@ export function saveLocalNews(news: NewsItem[]) {
 
 export async function fetchNewsSafe(): Promise<{ data: NewsItem[]; isTableSupported: boolean }> {
   try {
-    const res = await fetch('/api/news');
+    const res = await fetch(`${getApiBaseUrl()}/api/news`);
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data) && data.length > 0) {
@@ -452,7 +464,7 @@ export async function addNewsSafe(title: string, content: string): Promise<{ ite
   };
 
   try {
-    const res = await fetch('/api/news', {
+    const res = await fetch(`${getApiBaseUrl()}/api/news`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newItem)
@@ -477,7 +489,7 @@ export async function updateNewsSafe(id: string, title: string, content: string)
   saveLocalNews(updated);
 
   try {
-    await fetch(`/api/news/${id}`, {
+    await fetch(`${getApiBaseUrl()}/api/news/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, content })
@@ -496,7 +508,7 @@ export async function deleteNewsSafe(id: string): Promise<{ success: boolean; er
   saveLocalNews(updated);
 
   try {
-    await fetch(`/api/news/${id}`, { method: 'DELETE' });
+    await fetch(`${getApiBaseUrl()}/api/news/${id}`, { method: 'DELETE' });
   } catch (err: any) {
     console.warn('deleteNews API error:', err);
   }
@@ -528,10 +540,11 @@ export function saveLocalUsers(users: UserItem[]) {
 
 export async function fetchUsersSafe(): Promise<UserItem[]> {
   try {
-    const res = await fetch('/api/users');
+    const res = await fetch(`${getApiBaseUrl()}/api/users`);
     if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
+      const raw = await res.json();
+      if (Array.isArray(raw) && raw.length > 0) {
+        const data = raw.map(u => ({ ...u, is_locked: Boolean(u.is_locked) }));
         saveLocalUsers(data);
         return data;
       }
@@ -554,7 +567,7 @@ export async function addUserSafe(user: { username: string; password?: string; r
   };
 
   try {
-    const res = await fetch('/api/users', {
+    const res = await fetch(`${getApiBaseUrl()}/api/users`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newUser)
@@ -578,7 +591,7 @@ export async function updateUserSafe(id: string | number, data: Partial<UserItem
   saveLocalUsers(updated);
 
   try {
-    await fetch(`/api/users/${id}`, {
+    await fetch(`${getApiBaseUrl()}/api/users/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -596,7 +609,7 @@ export async function deleteUserSafe(id: string | number): Promise<{ success: bo
   saveLocalUsers(updated);
 
   try {
-    await fetch(`/api/users/${id}`, { method: 'DELETE' });
+    await fetch(`${getApiBaseUrl()}/api/users/${id}`, { method: 'DELETE' });
   } catch (err: any) {
     console.warn('deleteUser API error:', err);
   }
@@ -610,7 +623,7 @@ export async function toggleUserLockSafe(id: string | number, currentLocked?: bo
   saveLocalUsers(currentUsers.map(u => (String(u.id) === String(id) ? { ...u, is_locked: newLocked } : u)));
 
   try {
-    await fetch(`/api/users/${id}`, {
+    await fetch(`${getApiBaseUrl()}/api/users/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_locked: newLocked })

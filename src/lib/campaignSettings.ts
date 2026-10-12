@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from './cloudflareD1';
+
 export interface CampaignSettings {
   campaign_name: string;
   phase_name: string;
@@ -34,7 +36,8 @@ export const getStoredCampaignSettings = (): CampaignSettings => {
 
 export const fetchCampaignSettings = async (): Promise<CampaignSettings> => {
   try {
-    const res = await fetch('/api/campaign-settings');
+    const baseUrl = getApiBaseUrl();
+    const res = await fetch(`${baseUrl}/api/campaign-settings`);
     if (res.ok) {
       const data = await res.json();
       if (data && data.campaign_name) {
@@ -70,7 +73,8 @@ export const saveCampaignSettings = async (
 
   // Update backend SQLite / Cloudflare D1
   try {
-    const res = await fetch('/api/campaign-settings', {
+    const baseUrl = getApiBaseUrl();
+    const res = await fetch(`${baseUrl}/api/campaign-settings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings)

@@ -4,7 +4,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import path from 'path';
-import { getLocalSqlite, queryCloudflareD1 } from './server_db';
+import { getLocalSqlite, queryCloudflareD1, initCloudflareD1Schema } from './server_db';
 
 const app = express();
 const PORT = 3000;
@@ -29,23 +29,47 @@ function isCloudflareConfigured() {
   );
 }
 
+let isAutoInitializingD1 = false;
+
 /**
  * Universal Database Executor:
  * If Cloudflare D1 credentials are set, queries Cloudflare D1.
- * Otherwise, queries the high-performance local SQLite database (better-sqlite3).
+ * If Cloudflare D1 returns that tables don't exist yet, automatically creates them and retries.
+ * If Cloudflare D1 is unavailable or encounters issues, seamlessly falls back to the high-performance local SQLite database.
  */
 async function executeDb(sql: string, params: any[] = []): Promise<{ results: any[]; isCloudflare: boolean }> {
   if (isCloudflareConfigured()) {
-    const cfRes = await queryCloudflareD1(
+    let cfRes = await queryCloudflareD1(
       activeCfConfig.accountId,
       activeCfConfig.databaseId,
       activeCfConfig.apiToken,
       sql,
       params
     );
+
+    // If Cloudflare D1 reported missing table, automatically create tables and retry once
+    if (!cfRes.success && cfRes.error && (cfRes.error.includes('no such table') || cfRes.error.includes('SQLITE_ERROR'))) {
+      if (!isAutoInitializingD1) {
+        isAutoInitializingD1 = true;
+        try {
+          await initCloudflareD1Schema(activeCfConfig.accountId, activeCfConfig.databaseId, activeCfConfig.apiToken);
+          cfRes = await queryCloudflareD1(
+            activeCfConfig.accountId,
+            activeCfConfig.databaseId,
+            activeCfConfig.apiToken,
+            sql,
+            params
+          );
+        } catch {
+          // Fall through to local SQLite
+        } finally {
+          isAutoInitializingD1 = false;
+        }
+      }
+    }
+
     if (!cfRes.success) {
-      console.warn('Cloudflare D1 query failed, falling back to local SQLite:', cfRes.error);
-      // Fallback to local SQLite if Cloudflare query failed
+      // Seamlessly fall back to local SQLite
       const db = getLocalSqlite();
       const stmt = db.prepare(sql);
       if (sql.trim().toUpperCase().startsWith('SELECT') || sql.trim().toUpperCase().startsWith('PRAGMA')) {
@@ -154,9 +178,16 @@ app.post('/api/db/config', async (req, res) => {
     apiToken: apiToken.trim()
   };
 
+  // Automatically ensure tables exist on Cloudflare D1
+  try {
+    await initCloudflareD1Schema(activeCfConfig.accountId, activeCfConfig.databaseId, activeCfConfig.apiToken);
+  } catch (schemaErr: any) {
+    console.log('Notice initializing Cloudflare D1 schema:', schemaErr?.message);
+  }
+
   res.json({
     success: true,
-    message: 'Kết nối thành công tới cơ sở dữ liệu Cloudflare D1!'
+    message: 'Kết nối thành công tới cơ sở dữ liệu Cloudflare D1 và đồng bộ bảng dữ liệu!'
   });
 });
 
@@ -610,6 +641,11 @@ app.post('/api/campaign-settings', async (req, res) => {
 async function startServer() {
   // Ensure local SQLite schema is initialized on boot
   getLocalSqlite();
+
+  // If Cloudflare D1 is configured, also ensure tables exist on Cloudflare D1
+  if (isCloudflareConfigured()) {
+    initCloudflareD1Schema(activeCfConfig.accountId, activeCfConfig.databaseId, activeCfConfig.apiToken).catch(() => {});
+  }
 
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

@@ -23,10 +23,13 @@ import {
   resetDatabaseConfig,
   initDatabaseTables,
   getStoredCloudflareConfig,
+  getStoredWorkerUrl,
+  saveStoredWorkerUrl,
   CloudflareDiagnosticResult,
   CloudflareD1Config
 } from '../lib/cloudflareD1';
 import { syncAllLocalToCloudflare } from '../lib/schemaFallback';
+import { CLOUDFLARE_WORKER_CODE } from '../lib/workerTemplate';
 
 const CLOUDFLARE_D1_SQL = `-- ==============================================================
 -- BẢNG DỮ LIỆU ĐẦY ĐỦ CHO CLOUDFLARE D1 (SQLITE)
@@ -103,6 +106,7 @@ VALUES (1, 'Campaign 2026', 'Spring Maneuvers', '23/03/2026', '06/04/2026');
 
 export default function DatabaseManager() {
   const [copied, setCopied] = useState(false);
+  const [copiedWorker, setCopiedWorker] = useState(false);
   const [testing, setTesting] = useState(false);
   const [diagResult, setDiagResult] = useState<CloudflareDiagnosticResult | null>(null);
 
@@ -110,6 +114,7 @@ export default function DatabaseManager() {
   const [accountId, setAccountId] = useState('');
   const [databaseId, setDatabaseId] = useState('');
   const [apiToken, setApiToken] = useState('');
+  const [workerUrl, setWorkerUrl] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -124,6 +129,7 @@ export default function DatabaseManager() {
     setAccountId(stored.accountId);
     setDatabaseId(stored.databaseId);
     setApiToken(stored.apiToken);
+    setWorkerUrl(getStoredWorkerUrl());
 
     loadStatus();
   }, []);
@@ -147,12 +153,25 @@ export default function DatabaseManager() {
     setTimeout(() => setCopied(false), 2500);
   };
 
+  const handleCopyWorker = () => {
+    navigator.clipboard.writeText(CLOUDFLARE_WORKER_CODE);
+    setCopiedWorker(true);
+    setTimeout(() => setCopiedWorker(false), 2500);
+  };
+
   const handleSaveConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaveError(null);
     setSaveSuccess(false);
 
+    saveStoredWorkerUrl(workerUrl.trim());
+
     if (!accountId.trim() || !databaseId.trim() || !apiToken.trim()) {
+      if (workerUrl.trim()) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 3000);
+        return;
+      }
       setSaveError('Vui lòng điền đầy đủ Account ID, Database ID và API Token.');
       return;
     }
@@ -181,6 +200,8 @@ export default function DatabaseManager() {
     setAccountId('');
     setDatabaseId('');
     setApiToken('');
+    setWorkerUrl('');
+    saveStoredWorkerUrl('');
     await loadStatus();
   };
 
@@ -398,6 +419,20 @@ export default function DatabaseManager() {
             />
           </div>
 
+          <div>
+            <label className="block text-xs font-semibold text-zinc-700 mb-1.5">
+              Cloudflare Worker URL (Tùy chọn)
+            </label>
+            <input
+              type="text"
+              value={workerUrl}
+              onChange={(e) => setWorkerUrl(e.target.value)}
+              placeholder="Ví dụ: https://for1.sonlahome.workers.dev (nếu muốn frontend gọi trực tiếp Worker của bạn)"
+              className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-200 rounded-xl text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono transition-all"
+            />
+            <span className="text-[11px] text-zinc-400 mt-1 block">Để trống nếu dùng máy chủ backend tích hợp hiện tại (khuyến nghị).</span>
+          </div>
+
           {saveError && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
               <AlertTriangle size={15} className="shrink-0" />
@@ -479,6 +514,57 @@ export default function DatabaseManager() {
           <div>1. <strong>Cách 1 (Nhanh nhất):</strong> Nhấn nút <strong>&quot;1-Click Khởi tạo bảng&quot;</strong> ở góc trên, hệ thống sẽ tự động tạo đủ 5 bảng kèm dữ liệu ban đầu.</div>
           <div>2. <strong>Cách 2 (Cloudflare D1 Dashboard):</strong> Mở <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="text-indigo-600 underline font-medium inline-flex items-center gap-0.5">Cloudflare Dashboard <ExternalLink size={10} /></a> -&gt; <strong>Workers &amp; Pages</strong> -&gt; <strong>D1</strong> -&gt; Chọn database của bạn -&gt; Tab <strong>Console</strong> -&gt; Dán đoạn SQL trên và chạy <strong>Execute</strong>.</div>
           <div>3. <strong>Cách 3 (Wrangler CLI):</strong> Chạy lệnh <code>npx wrangler d1 execute &lt;DATABASE_NAME&gt; --file=./cloudflare_d1_setup.sql</code></div>
+        </div>
+      </div>
+
+      {/* 4. Cloudflare Worker Deployment & Error 1042 Troubleshooting */}
+      <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-amber-100 text-amber-700 p-2.5 rounded-xl">
+              <Server size={22} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-zinc-900">Mã Cloudflare Worker (for1.sonlahome.workers.dev)</h3>
+              <p className="text-xs text-zinc-500">
+                Xử lý triệt để mã lỗi 1042 khi mở link Worker và kết nối trọn vẹn với Cloudflare D1.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleCopyWorker}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all shadow-sm ${
+              copiedWorker
+                ? 'bg-emerald-600 text-white'
+                : 'bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold'
+            }`}
+          >
+            {copiedWorker ? <Check size={14} /> : <Copy size={14} />}
+            <span>{copiedWorker ? 'Đã sao chép mã Worker!' : 'Sao chép mã Cloudflare Worker'}</span>
+          </button>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-900 mb-4 space-y-2">
+          <div className="font-bold flex items-center gap-1.5 text-amber-800">
+            <AlertTriangle size={15} />
+            <span>Tại sao for1.sonlahome.workers.dev báo &quot;error code: 1042&quot; hoặc không tải được dữ liệu?</span>
+          </div>
+          <p>
+            Mã lỗi <strong>1042</strong> từ Cloudflare xuất hiện khi Worker chưa có code được Deploy (hoặc chưa nhấn nút <strong>Save and deploy</strong> trong Cloudflare Dashboard) hoặc chưa gắn biến <strong>DB</strong> (D1 binding).
+          </p>
+          <div className="mt-2 font-medium text-amber-950">
+            👉 <strong>Cách kích hoạt Worker trong 30 giây:</strong>
+            <ol className="list-decimal pl-5 mt-1 space-y-1">
+              <li>Vào <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="underline font-bold text-indigo-700">Cloudflare Dashboard</a> &rarr; <strong>Workers &amp; Pages</strong> &rarr; Chọn Worker <code>for1</code>.</li>
+              <li>Vào <strong>Settings</strong> &rarr; <strong>Variables</strong> &rarr; mục <strong>D1 Database Bindings</strong> &rarr; Bấm <strong>Add binding</strong>: đặt Variable name là <code>DB</code> và chọn Database D1 của bạn.</li>
+              <li>Bấm nút <strong>Edit code</strong> (hoặc Quick Edit), dán toàn bộ đoạn mã Worker đã sao chép ở đây vào rồi bấm <strong>Save and deploy</strong>.</li>
+            </ol>
+          </div>
+        </div>
+
+        <div className="bg-zinc-900 rounded-xl p-4 overflow-x-auto text-xs font-mono text-zinc-300 max-h-72 border border-zinc-800">
+          <pre>{CLOUDFLARE_WORKER_CODE}</pre>
         </div>
       </div>
     </div>
