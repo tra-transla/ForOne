@@ -72,14 +72,14 @@ ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS campaign_settings (
   id INT PRIMARY KEY DEFAULT 1,
   campaign_name TEXT NOT NULL DEFAULT 'Campaign 2026',
-  phase_name TEXT NOT NULL DEFAULT 'Spring Maneuvers',
-  start_date TEXT NOT NULL DEFAULT '23/03/2026',
-  end_date TEXT NOT NULL DEFAULT '06/04/2026',
+  phase_name TEXT NOT NULL DEFAULT 'Rally Your Clan',
+  start_date TEXT NOT NULL DEFAULT '09/11/2026',
+  end_date TEXT NOT NULL DEFAULT '23/11/2026',
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
 INSERT INTO campaign_settings (id, campaign_name, phase_name, start_date, end_date)
-VALUES (1, 'Campaign 2026', 'Spring Maneuvers', '23/03/2026', '06/04/2026')
+VALUES (1, 'Campaign 2026', 'Rally Your Clan', '23/03/2026', '06/04/2026')
 ON CONFLICT (id) DO NOTHING;
 
 -- 6. TẮT ROW LEVEL SECURITY (RLS) để Anon Key có thể truy vấn và thao tác

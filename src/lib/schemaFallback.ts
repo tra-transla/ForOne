@@ -1,4 +1,4 @@
-import { syncToCloudflareDb, getApiBaseUrl } from './cloudflareD1';
+import { supabase, syncAllDataToSupabase } from './supabase';
 
 export interface NewsItem {
   id: string;
@@ -138,8 +138,26 @@ export function saveLocalLockedTeams(teams: string[]) {
 }
 
 export async function fetchTeamsSafe(): Promise<{ data: TeamItem[]; isLockedColumnSupported: boolean }> {
+  // 1. Primary: Supabase Cloud Database
   try {
-    const res = await fetch(`${getApiBaseUrl()}/api/teams`);
+    const { data, error } = await supabase.from('teams').select('*').order('created_at', { ascending: true });
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const mapped = data.map(t => ({
+        id: t.id,
+        name: t.name,
+        is_locked: Boolean(t.is_locked),
+        created_at: t.created_at
+      }));
+      saveLocalTeams(mapped);
+      return { data: mapped, isLockedColumnSupported: true };
+    }
+  } catch (err) {
+    console.warn('Supabase fetchTeams error, using local fallback:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite API
+  try {
+    const res = await fetch('/api/teams');
     if (res.ok) {
       const raw = await res.json();
       if (Array.isArray(raw)) {
@@ -152,9 +170,10 @@ export async function fetchTeamsSafe(): Promise<{ data: TeamItem[]; isLockedColu
       }
     }
   } catch (err) {
-    console.warn('fetchTeamsSafe API error, using local fallback:', err);
+    console.warn('fetchTeamsSafe API error, using local storage:', err);
   }
 
+  // 3. Fallback: LocalStorage
   const localTeams = getLocalTeams();
   const localLocked = getLocalLockedTeams();
   return {
@@ -177,24 +196,29 @@ export async function addTeamSafe(name: string): Promise<{ team: TeamItem; error
     created_at: new Date().toISOString()
   };
 
+  // 1. Write to Supabase Cloud Database
   try {
-    const res = await fetch(`${getApiBaseUrl()}/api/teams`, {
+    await supabase.from('teams').insert([{ id: teamId, name: trimmed, is_locked: false }]);
+  } catch (err) {
+    console.warn('Supabase addTeam error:', err);
+  }
+
+  // 2. Write to Local Server SQLite backup
+  try {
+    const res = await fetch('/api/teams', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: teamId, name: trimmed, is_locked: false })
     });
     if (res.ok) {
       const data = await res.json();
-      const updated = [...currentTeams.filter(t => t.id !== data.id && t.name !== data.name), { ...data, is_locked: Boolean(data.is_locked) }];
-      saveLocalTeams(updated);
-      window.dispatchEvent(new CustomEvent('teams_updated'));
-      return { team: data };
+      newTeam.id = data.id || teamId;
     }
   } catch (err: any) {
     console.warn('Add team API error:', err);
   }
 
-  // Fallback to local
+  // 3. Update LocalStorage cache
   const updated = [...currentTeams.filter(t => t.name !== trimmed), newTeam];
   saveLocalTeams(updated);
   window.dispatchEvent(new CustomEvent('teams_updated'));
@@ -216,9 +240,22 @@ export async function updateTeamSafe(idOrName: string, oldName: string, newName:
   const updatedRegs = localRegs.map(r => (r.team === oldName ? { ...r, team: trimmedNew } : r));
   saveLocalRegistrations(updatedRegs);
 
+  // 1. Supabase Cloud Database
+  try {
+    if (isValidUuid(idOrName)) {
+      await supabase.from('teams').update({ name: trimmedNew }).eq('id', idOrName);
+    } else {
+      await supabase.from('teams').update({ name: trimmedNew }).eq('name', oldName);
+    }
+    await supabase.from('registrations').update({ team: trimmedNew }).eq('team', oldName);
+  } catch (err) {
+    console.warn('Supabase updateTeam error:', err);
+  }
+
+  // 2. Local Server SQLite
   try {
     const encodedId = encodeURIComponent(idOrName);
-    await fetch(`${getApiBaseUrl()}/api/teams/${encodedId}`, {
+    await fetch(`/api/teams/${encodedId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: trimmedNew })
@@ -237,33 +274,26 @@ export async function deleteTeamSafe(idOrName: string, teamName: string): Promis
   const updatedTeams = currentTeams.filter(t => t.id !== idOrName && t.name !== teamName && t.name !== idOrName);
   saveLocalTeams(updatedTeams);
 
-  const encodedId = encodeURIComponent(idOrName);
-  const baseUrl = getApiBaseUrl();
-
+  // 1. Supabase Cloud Database
   try {
-    const res = await fetch(`${baseUrl}/api/teams/${encodedId}`, {
+    if (isValidUuid(idOrName)) {
+      await supabase.from('teams').delete().eq('id', idOrName);
+    } else {
+      await supabase.from('teams').delete().eq('name', teamName);
+    }
+  } catch (err) {
+    console.warn('Supabase deleteTeam error:', err);
+  }
+
+  // 2. Local Server SQLite
+  const encodedId = encodeURIComponent(idOrName);
+  try {
+    await fetch(`/api/teams/${encodedId}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: teamName })
     });
-
-    if (!res.ok && baseUrl) {
-      await fetch(`/api/teams/${encodedId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: teamName })
-      });
-    }
   } catch (err: any) {
-    if (baseUrl) {
-      try {
-        await fetch(`/api/teams/${encodedId}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: teamName })
-        });
-      } catch {}
-    }
     console.warn('deleteTeam API error:', err);
   }
 
@@ -276,8 +306,20 @@ export async function toggleTeamLockSafe(team: TeamItem): Promise<boolean> {
   const currentTeams = getLocalTeams();
   saveLocalTeams(currentTeams.map(t => ((t.name === team.name || t.id === team.id) ? { ...t, is_locked: newLocked } : t)));
 
+  // 1. Supabase Cloud Database
   try {
-    await fetch(`${getApiBaseUrl()}/api/teams/${team.id}`, {
+    if (isValidUuid(team.id)) {
+      await supabase.from('teams').update({ is_locked: newLocked }).eq('id', team.id);
+    } else {
+      await supabase.from('teams').update({ is_locked: newLocked }).eq('name', team.name);
+    }
+  } catch (err) {
+    console.warn('Supabase toggleTeamLock error:', err);
+  }
+
+  // 2. Local Server SQLite
+  try {
+    await fetch(`/api/teams/${team.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_locked: newLocked })
@@ -312,8 +354,28 @@ export function saveLocalRegistrations(regs: RegistrationItem[]) {
 }
 
 export async function fetchRegistrationsSafe(): Promise<{ data: RegistrationItem[] }> {
+  // 1. Primary: Supabase Cloud Database
   try {
-    const res = await fetch(`${getApiBaseUrl()}/api/registrations`);
+    const { data, error } = await supabase.from('registrations').select('*').order('created_at', { ascending: false });
+    if (!error && Array.isArray(data)) {
+      const mapped = data.map(r => ({
+        id: r.id,
+        team: r.team,
+        in_game_name: r.in_game_name,
+        tanks: r.tanks,
+        is_winner: Boolean(r.is_winner),
+        created_at: r.created_at
+      }));
+      saveLocalRegistrations(mapped);
+      return { data: mapped };
+    }
+  } catch (err) {
+    console.warn('Supabase fetchRegistrations error, checking local fallback:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite
+  try {
+    const res = await fetch('/api/registrations');
     if (res.ok) {
       const raw = await res.json();
       if (Array.isArray(raw)) {
@@ -329,6 +391,7 @@ export async function fetchRegistrationsSafe(): Promise<{ data: RegistrationItem
     console.warn('fetchRegistrationsSafe API error, using local:', err);
   }
 
+  // 3. Fallback: LocalStorage
   return { data: getLocalRegistrations() };
 }
 
@@ -350,8 +413,23 @@ export async function addRegistrationSafe(reg: {
     is_winner: false
   };
 
+  // 1. Primary: Supabase Cloud Database
   try {
-    const res = await fetch(`${getApiBaseUrl()}/api/register`, {
+    await supabase.from('registrations').insert([{
+      id: newId,
+      team: reg.team,
+      in_game_name: inGameName,
+      tanks: reg.tanks,
+      is_winner: false,
+      created_at: newReg.created_at
+    }]);
+  } catch (err) {
+    console.warn('Supabase addRegistration error:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite backup
+  try {
+    const res = await fetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -369,6 +447,7 @@ export async function addRegistrationSafe(reg: {
     console.warn('addRegistration API error:', err);
   }
 
+  // 3. Update LocalStorage cache
   const updated = [newReg, ...currentRegs];
   saveLocalRegistrations(updated);
   window.dispatchEvent(new CustomEvent('registrations_updated'));
@@ -383,8 +462,20 @@ export async function updateRegistrationSafe(
   const updated = currentRegs.map(r => (String(r.id) === String(id) ? { ...r, ...updatedData } : r));
   saveLocalRegistrations(updated);
 
+  // 1. Supabase Cloud Database
   try {
-    await fetch(`${getApiBaseUrl()}/api/registrations/${id}`, {
+    await supabase.from('registrations').update({
+      team: updatedData.team,
+      in_game_name: updatedData.in_game_name,
+      tanks: updatedData.tanks
+    }).eq('id', id);
+  } catch (err) {
+    console.warn('Supabase updateRegistration error:', err);
+  }
+
+  // 2. Local Server SQLite
+  try {
+    await fetch(`/api/registrations/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedData)
@@ -408,11 +499,17 @@ export async function deleteRegistrationSafe(
   );
   saveLocalRegistrations(updated);
 
-  const encodedId = encodeURIComponent(String(id));
-  const baseUrl = getApiBaseUrl();
-
+  // 1. Supabase Cloud Database
   try {
-    const res = await fetch(`${baseUrl}/api/registrations/${encodedId}`, {
+    await supabase.from('registrations').delete().eq('id', id);
+  } catch (err) {
+    console.warn('Supabase deleteRegistration error:', err);
+  }
+
+  // 2. Local Server SQLite
+  const encodedId = encodeURIComponent(String(id));
+  try {
+    await fetch(`/api/registrations/${encodedId}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -420,30 +517,7 @@ export async function deleteRegistrationSafe(
         team: fallbackInfo?.team
       })
     });
-    if (!res.ok && baseUrl) {
-      // Fallback to local server
-      await fetch(`/api/registrations/${encodedId}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          in_game_name: fallbackInfo?.in_game_name,
-          team: fallbackInfo?.team
-        })
-      });
-    }
   } catch (err: any) {
-    if (baseUrl) {
-      try {
-        await fetch(`/api/registrations/${encodedId}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            in_game_name: fallbackInfo?.in_game_name,
-            team: fallbackInfo?.team
-          })
-        });
-      } catch {}
-    }
     console.warn('deleteRegistration API error:', err);
   }
 
@@ -451,28 +525,38 @@ export async function deleteRegistrationSafe(
   return { success: true };
 }
 
-export async function toggleWinnerSafe(
+export async function toggleRegistrationWinnerSafe(
   id: string | number,
-  currentStatus: boolean | undefined,
-  fallbackInGameName?: string
+  currentWinner?: boolean,
+  inGameName?: string
 ): Promise<boolean> {
-  const newStatus = !currentStatus;
+  const newWinner = !currentWinner;
   const currentRegs = getLocalRegistrations();
-  saveLocalRegistrations(currentRegs.map(r => (String(r.id) === String(id) || (fallbackInGameName && r.in_game_name === fallbackInGameName) ? { ...r, is_winner: newStatus } : r)));
+  saveLocalRegistrations(currentRegs.map(r => (String(r.id) === String(id) ? { ...r, is_winner: newWinner } : r)));
 
+  // 1. Supabase Cloud Database
   try {
-    await fetch(`${getApiBaseUrl()}/api/registrations/${id}`, {
+    await supabase.from('registrations').update({ is_winner: newWinner }).eq('id', id);
+  } catch (err) {
+    console.warn('Supabase toggleWinner error:', err);
+  }
+
+  // 2. Local Server SQLite
+  try {
+    await fetch(`/api/registrations/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_winner: newStatus })
+      body: JSON.stringify({ is_winner: newWinner })
     });
   } catch (err: any) {
-    console.warn('toggleWinner API error:', err);
+    console.warn('toggleRegistrationWinner API error:', err);
   }
 
   window.dispatchEvent(new CustomEvent('registrations_updated'));
-  return newStatus;
+  return newWinner;
 }
+
+export const toggleWinnerSafe = toggleRegistrationWinnerSafe;
 
 // ==========================================
 // NEWS HELPERS
@@ -481,7 +565,7 @@ export async function toggleWinnerSafe(
 export function getLocalNews(): NewsItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_NEWS_KEY);
-    if (raw !== null) {
+    if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
@@ -496,8 +580,20 @@ export function saveLocalNews(news: NewsItem[]) {
 }
 
 export async function fetchNewsSafe(): Promise<{ data: NewsItem[]; isTableSupported: boolean }> {
+  // 1. Primary: Supabase Cloud Database
   try {
-    const res = await fetch(`${getApiBaseUrl()}/api/news`);
+    const { data, error } = await supabase.from('news').select('*').order('created_at', { ascending: false });
+    if (!error && Array.isArray(data) && data.length > 0) {
+      saveLocalNews(data);
+      return { data, isTableSupported: true };
+    }
+  } catch (err) {
+    console.warn('Supabase fetchNews error:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite
+  try {
+    const res = await fetch('/api/news');
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data)) {
@@ -522,8 +618,16 @@ export async function addNewsSafe(title: string, content: string): Promise<{ ite
     created_at: new Date().toISOString()
   };
 
+  // 1. Primary: Supabase Cloud Database
   try {
-    const res = await fetch(`${getApiBaseUrl()}/api/news`, {
+    await supabase.from('news').insert([newItem]);
+  } catch (err) {
+    console.warn('Supabase addNews error:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite backup
+  try {
+    const res = await fetch('/api/news', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newItem)
@@ -538,7 +642,6 @@ export async function addNewsSafe(title: string, content: string): Promise<{ ite
 
   const updated = [newItem, ...currentNews];
   saveLocalNews(updated);
-  window.dispatchEvent(new CustomEvent('news_updated'));
   return { item: newItem };
 }
 
@@ -547,18 +650,25 @@ export async function updateNewsSafe(id: string, title: string, content: string)
   const updated = currentNews.map(n => (n.id === id ? { ...n, title: title.trim(), content: content.trim() } : n));
   saveLocalNews(updated);
 
+  // 1. Supabase Cloud Database
+  try {
+    await supabase.from('news').update({ title: title.trim(), content: content.trim() }).eq('id', id);
+  } catch (err) {
+    console.warn('Supabase updateNews error:', err);
+  }
+
+  // 2. Local Server SQLite
   try {
     const encodedId = encodeURIComponent(id);
-    await fetch(`${getApiBaseUrl()}/api/news/${encodedId}`, {
+    await fetch(`/api/news/${encodedId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, content })
+      body: JSON.stringify({ title: title.trim(), content: content.trim() })
     });
   } catch (err: any) {
     console.warn('updateNews API error:', err);
   }
 
-  window.dispatchEvent(new CustomEvent('news_updated'));
   return { success: true };
 }
 
@@ -567,24 +677,21 @@ export async function deleteNewsSafe(id: string): Promise<{ success: boolean; er
   const updated = currentNews.filter(n => n.id !== id);
   saveLocalNews(updated);
 
-  const encodedId = encodeURIComponent(id);
-  const baseUrl = getApiBaseUrl();
-
+  // 1. Supabase Cloud Database
   try {
-    const res = await fetch(`${baseUrl}/api/news/${encodedId}`, { method: 'DELETE' });
-    if (!res.ok && baseUrl) {
-      await fetch(`/api/news/${encodedId}`, { method: 'DELETE' });
-    }
+    await supabase.from('news').delete().eq('id', id);
+  } catch (err) {
+    console.warn('Supabase deleteNews error:', err);
+  }
+
+  // 2. Local Server SQLite
+  const encodedId = encodeURIComponent(id);
+  try {
+    await fetch(`/api/news/${encodedId}`, { method: 'DELETE' });
   } catch (err: any) {
-    if (baseUrl) {
-      try {
-        await fetch(`/api/news/${encodedId}`, { method: 'DELETE' });
-      } catch {}
-    }
     console.warn('deleteNews API error:', err);
   }
 
-  window.dispatchEvent(new CustomEvent('news_updated'));
   return { success: true };
 }
 
@@ -595,7 +702,7 @@ export async function deleteNewsSafe(id: string): Promise<{ success: boolean; er
 export function getLocalUsers(): UserItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_USERS_KEY);
-    if (raw !== null) {
+    if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
@@ -610,8 +717,27 @@ export function saveLocalUsers(users: UserItem[]) {
 }
 
 export async function fetchUsersSafe(): Promise<UserItem[]> {
+  // 1. Primary: Supabase Cloud Database
   try {
-    const res = await fetch(`${getApiBaseUrl()}/api/users`);
+    const { data, error } = await supabase.from('users').select('*').order('created_at', { ascending: true });
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const mapped = data.map(u => ({
+        id: u.id,
+        username: u.username,
+        password: u.password,
+        role: u.role || 'Quản trị',
+        is_locked: Boolean(u.is_locked)
+      }));
+      saveLocalUsers(mapped);
+      return mapped;
+    }
+  } catch (err) {
+    console.warn('Supabase fetchUsers error:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite
+  try {
+    const res = await fetch('/api/users');
     if (res.ok) {
       const raw = await res.json();
       if (Array.isArray(raw)) {
@@ -623,6 +749,7 @@ export async function fetchUsersSafe(): Promise<UserItem[]> {
   } catch (err) {
     console.warn('fetchUsersSafe API error:', err);
   }
+
   return getLocalUsers();
 }
 
@@ -637,8 +764,22 @@ export async function addUserSafe(user: { username: string; password?: string; r
     is_locked: false
   };
 
+  // 1. Primary: Supabase Cloud Database
   try {
-    const res = await fetch(`${getApiBaseUrl()}/api/users`, {
+    await supabase.from('users').insert([{
+      id: newId,
+      username: newUser.username,
+      password: newUser.password || '',
+      role: newUser.role,
+      is_locked: false
+    }]);
+  } catch (err) {
+    console.warn('Supabase addUser error:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite backup
+  try {
+    const res = await fetch('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newUser)
@@ -661,9 +802,17 @@ export async function updateUserSafe(id: string | number, data: Partial<UserItem
   const updated = currentUsers.map(u => (String(u.id) === String(id) ? { ...u, ...data } : u));
   saveLocalUsers(updated);
 
+  // 1. Supabase Cloud Database
+  try {
+    await supabase.from('users').update(data).eq('id', id);
+  } catch (err) {
+    console.warn('Supabase updateUser error:', err);
+  }
+
+  // 2. Local Server SQLite
   try {
     const encodedId = encodeURIComponent(String(id));
-    await fetch(`${getApiBaseUrl()}/api/users/${encodedId}`, {
+    await fetch(`/api/users/${encodedId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -680,20 +829,18 @@ export async function deleteUserSafe(id: string | number): Promise<{ success: bo
   const updated = currentUsers.filter(u => String(u.id) !== String(id));
   saveLocalUsers(updated);
 
-  const encodedId = encodeURIComponent(String(id));
-  const baseUrl = getApiBaseUrl();
-
+  // 1. Supabase Cloud Database
   try {
-    const res = await fetch(`${baseUrl}/api/users/${encodedId}`, { method: 'DELETE' });
-    if (!res.ok && baseUrl) {
-      await fetch(`/api/users/${encodedId}`, { method: 'DELETE' });
-    }
+    await supabase.from('users').delete().eq('id', id);
+  } catch (err) {
+    console.warn('Supabase deleteUser error:', err);
+  }
+
+  // 2. Local Server SQLite
+  const encodedId = encodeURIComponent(String(id));
+  try {
+    await fetch(`/api/users/${encodedId}`, { method: 'DELETE' });
   } catch (err: any) {
-    if (baseUrl) {
-      try {
-        await fetch(`/api/users/${encodedId}`, { method: 'DELETE' });
-      } catch {}
-    }
     console.warn('deleteUser API error:', err);
   }
 
@@ -705,8 +852,16 @@ export async function toggleUserLockSafe(id: string | number, currentLocked?: bo
   const currentUsers = getLocalUsers();
   saveLocalUsers(currentUsers.map(u => (String(u.id) === String(id) ? { ...u, is_locked: newLocked } : u)));
 
+  // 1. Supabase Cloud Database
   try {
-    await fetch(`${getApiBaseUrl()}/api/users/${id}`, {
+    await supabase.from('users').update({ is_locked: newLocked }).eq('id', id);
+  } catch (err) {
+    console.warn('Supabase toggleUserLock error:', err);
+  }
+
+  // 2. Local Server SQLite
+  try {
+    await fetch(`/api/users/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ is_locked: newLocked })
@@ -719,11 +874,11 @@ export async function toggleUserLockSafe(id: string | number, currentLocked?: bo
 }
 
 /**
- * Sync entire dataset to Cloudflare / SQLite backend
+ * Sync entire local/cached dataset directly to Supabase Cloud Database
  */
-export async function syncAllLocalToCloudflare(): Promise<{
+export async function syncAllLocalToSupabase(): Promise<{
   success: boolean;
-  count: { teams: number; regs: number; news: number; users: number };
+  count: { teams: number; regs: number; news: number; users: number; settings: number };
   error?: string;
 }> {
   try {
@@ -738,12 +893,12 @@ export async function syncAllLocalToCloudflare(): Promise<{
       if (raw) campaignSettings = JSON.parse(raw);
     } catch {}
 
-    const res = await syncToCloudflareDb({
+    const res = await syncAllDataToSupabase({
       teams,
+      registrations: regs,
       users,
       news,
-      registrations: regs,
-      campaignSettings
+      campaign_settings: campaignSettings
     });
 
     if (!res.success) throw new Error(res.error);
@@ -751,17 +906,18 @@ export async function syncAllLocalToCloudflare(): Promise<{
     return {
       success: true,
       count: {
-        teams: teams.length,
-        regs: regs.length,
-        news: news.length,
-        users: users.length
+        teams: res.details?.teams ?? teams.length,
+        regs: res.details?.registrations ?? regs.length,
+        news: res.details?.news ?? news.length,
+        users: res.details?.users ?? users.length,
+        settings: res.details?.settings ?? 1
       }
     };
   } catch (err: any) {
     return {
       success: false,
-      count: { teams: 0, regs: 0, news: 0, users: 0 },
-      error: err?.message || 'Có lỗi khi đồng bộ dữ liệu sang Aiven MySQL / SQLite'
+      count: { teams: 0, regs: 0, news: 0, users: 0, settings: 0 },
+      error: err?.message || 'Có lỗi khi đồng bộ dữ liệu sang Supabase Cloud Database'
     };
   }
 }

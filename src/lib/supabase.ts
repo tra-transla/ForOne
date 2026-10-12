@@ -8,9 +8,7 @@ export const DEFAULT_SUPABASE_ANON_KEY =
 export function sanitizeSupabaseUrl(url?: string | null): string {
   if (!url) return '';
   let cleaned = url.trim();
-  // Remove trailing slashes
   cleaned = cleaned.replace(/\/+$/, '');
-  // Remove /rest/v1 or /rest if mistakenly appended
   cleaned = cleaned.replace(/\/rest(\/v1)?\/?$/, '');
   return cleaned;
 }
@@ -79,7 +77,6 @@ export function getActiveSupabaseClient(): SupabaseClient {
         }
       });
     } catch {
-      // Fallback client if URL syntax was bad
       cachedClient = createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY);
     }
   }
@@ -132,17 +129,49 @@ export const supabase: SupabaseClient = new Proxy({} as SupabaseClient, {
   }
 });
 
+/**
+ * Subscribe to realtime changes on a Supabase table
+ */
+export function subscribeToSupabaseTable(table: string, onUpdate: () => void): () => void {
+  try {
+    const client = getActiveSupabaseClient();
+    const channelName = `realtime_${table}_${Date.now()}`;
+    const channel = client
+      .channel(channelName)
+      .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+        onUpdate();
+      })
+      .subscribe();
+
+    return () => {
+      try {
+        client.removeChannel(channel);
+      } catch {}
+    };
+  } catch {
+    return () => {};
+  }
+}
+
 export interface SupabaseDiagnosticResult {
   ok: boolean;
   code: 'CONNECTED' | 'PAUSED_OR_DNS_ERROR' | 'INVALID_KEY' | 'TABLE_ERROR' | 'NETWORK_ERROR';
   message: string;
   details?: any;
+  url: string;
+  latencyMs?: number;
   tables?: {
     teams: boolean;
     registrations: boolean;
     users: boolean;
     news: boolean;
     campaign_settings: boolean;
+  };
+  counts?: {
+    teams?: number;
+    registrations?: number;
+    users?: number;
+    news?: number;
   };
   canWrite?: boolean;
 }
@@ -152,20 +181,28 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
   const targetUrl = (customUrl && isValidSupabaseUrl(customUrl)) ? sanitizeSupabaseUrl(customUrl) : currentConfig.url;
   const targetKey = (customKey && isValidSupabaseKey(customKey)) ? customKey.trim() : currentConfig.key;
 
+  const startTime = Date.now();
+
   // 1. Direct Ping test
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
     const pingRes = await fetch(`${targetUrl.replace(/\/+$/, '')}/rest/v1/`, {
       method: 'GET',
       headers: {
         apikey: targetKey,
         Authorization: `Bearer ${targetKey}`
-      }
+      },
+      signal: controller.signal
     });
+    clearTimeout(timeoutId);
 
     if (pingRes.status === 401 || pingRes.status === 403) {
       return {
         ok: false,
         code: 'INVALID_KEY',
+        url: targetUrl,
+        latencyMs: Date.now() - startTime,
         message: 'Khóa Anon Key / Publishable Key không hợp lệ hoặc đã hết hạn (Mã 401/403). Vui lòng kiểm tra lại Key trong Supabase Project Settings → API.'
       };
     }
@@ -174,7 +211,9 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
     return {
       ok: false,
       code: 'PAUSED_OR_DNS_ERROR',
-      message: 'Không thể kết nối đến máy chủ Supabase. Dự án có thể đang ở trạng thái TẠM DỪNG (Paused), hoặc tên miền/URL dự án không tồn tại. Nếu bạn vừa tạo dự án mới trên Supabase, hãy dán Project URL và Key mới vào cấu hình bên dưới.',
+      url: targetUrl,
+      latencyMs: Date.now() - startTime,
+      message: 'Không thể kết nối đến máy chủ Supabase (' + targetUrl + '). Dự án có thể đang ở trạng thái TẠM DỪNG (Paused), hoặc tên miền/URL dự án không tồn tại. Nếu bạn vừa tạo dự án mới trên Supabase, hãy dán Project URL và Anon Key mới vào form bên dưới.',
       details: errStr
     };
   }
@@ -188,19 +227,24 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
     news: false,
     campaign_settings: false
   };
+  const counts: Record<string, number> = {};
 
   try {
-    const tTeams = await testClient.from('teams').select('id').limit(1);
+    const tTeams = await testClient.from('teams').select('id', { count: 'exact' }).limit(1);
     tables.teams = !tTeams.error;
+    if (tTeams.count !== null && tTeams.count !== undefined) counts.teams = tTeams.count;
 
-    const tRegs = await testClient.from('registrations').select('id').limit(1);
+    const tRegs = await testClient.from('registrations').select('id', { count: 'exact' }).limit(1);
     tables.registrations = !tRegs.error;
+    if (tRegs.count !== null && tRegs.count !== undefined) counts.registrations = tRegs.count;
 
-    const tUsers = await testClient.from('users').select('id').limit(1);
+    const tUsers = await testClient.from('users').select('id', { count: 'exact' }).limit(1);
     tables.users = !tUsers.error;
+    if (tUsers.count !== null && tUsers.count !== undefined) counts.users = tUsers.count;
 
-    const tNews = await testClient.from('news').select('id').limit(1);
+    const tNews = await testClient.from('news').select('id', { count: 'exact' }).limit(1);
     tables.news = !tNews.error;
+    if (tNews.count !== null && tNews.count !== undefined) counts.news = tNews.count;
 
     const tCS = await testClient.from('campaign_settings').select('id').limit(1);
     tables.campaign_settings = !tCS.error;
@@ -217,13 +261,17 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
     } catch {}
 
     const allTablesOk = tables.teams && tables.registrations && tables.users && tables.news && tables.campaign_settings;
+    const latencyMs = Date.now() - startTime;
 
     if (!allTablesOk) {
       return {
         ok: false,
         code: 'TABLE_ERROR',
-        message: 'Kết nối máy chủ thành công nhưng một số bảng dữ liệu chưa được khởi tạo. Vui lòng chạy mã SQL bên dưới trong Supabase SQL Editor.',
+        url: targetUrl,
+        latencyMs,
+        message: 'Kết nối máy chủ Supabase thành công nhưng một số bảng dữ liệu chưa được khởi tạo. Vui lòng sao chép mã SQL bên dưới và chạy trong Supabase SQL Editor.',
         tables,
+        counts,
         canWrite
       };
     }
@@ -231,16 +279,113 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
     return {
       ok: true,
       code: 'CONNECTED',
-      message: 'Kết nối Supabase Cloud Database hoàn hảo! Đọc, ghi, sửa, xóa dữ liệu hoạt động 100% thời gian thực.',
+      url: targetUrl,
+      latencyMs,
+      message: `Kết nối Supabase Cloud Database hoàn hảo (${latencyMs}ms)! Đọc, ghi, sửa, xóa dữ liệu hoạt động 100% thời gian thực.`,
       tables,
+      counts,
       canWrite
     };
   } catch (err: any) {
     return {
       ok: false,
       code: 'NETWORK_ERROR',
+      url: targetUrl,
+      latencyMs: Date.now() - startTime,
       message: 'Lỗi trong quá trình truy vấn bảng dữ liệu: ' + (err.message || 'Unknown error'),
       details: err
     };
+  }
+}
+
+/**
+ * Sync all local/cached data into Supabase
+ */
+export async function syncAllDataToSupabase(payload: {
+  teams: any[];
+  registrations: any[];
+  users: any[];
+  news: any[];
+  campaign_settings?: any;
+}): Promise<{ success: boolean; details?: Record<string, number>; error?: string }> {
+  const client = getActiveSupabaseClient();
+  const details: Record<string, number> = {
+    teams: 0,
+    registrations: 0,
+    users: 0,
+    news: 0,
+    settings: 0
+  };
+
+  try {
+    // 1. Sync teams
+    if (payload.teams && payload.teams.length > 0) {
+      const cleanTeams = payload.teams.map(t => ({
+        id: t.id,
+        name: t.name,
+        is_locked: Boolean(t.is_locked),
+        created_at: t.created_at || new Date().toISOString()
+      }));
+      const { error } = await client.from('teams').upsert(cleanTeams, { onConflict: 'name' });
+      if (!error) details.teams = cleanTeams.length;
+    }
+
+    // 2. Sync registrations
+    if (payload.registrations && payload.registrations.length > 0) {
+      const cleanRegs = payload.registrations.map(r => ({
+        id: r.id,
+        team: r.team,
+        in_game_name: r.in_game_name,
+        tanks: r.tanks,
+        is_winner: Boolean(r.is_winner),
+        created_at: r.created_at || new Date().toISOString()
+      }));
+      const { error } = await client.from('registrations').upsert(cleanRegs, { onConflict: 'id' });
+      if (!error) details.registrations = cleanRegs.length;
+    }
+
+    // 3. Sync users
+    if (payload.users && payload.users.length > 0) {
+      const cleanUsers = payload.users.map(u => ({
+        id: u.id,
+        username: u.username,
+        password: u.password,
+        role: u.role || 'Quản trị',
+        is_locked: Boolean(u.is_locked),
+        created_at: u.created_at || new Date().toISOString()
+      }));
+      const { error } = await client.from('users').upsert(cleanUsers, { onConflict: 'username' });
+      if (!error) details.users = cleanUsers.length;
+    }
+
+    // 4. Sync news
+    if (payload.news && payload.news.length > 0) {
+      const cleanNews = payload.news.map(n => ({
+        id: n.id,
+        title: n.title,
+        content: n.content,
+        created_at: n.created_at || new Date().toISOString()
+      }));
+      const { error } = await client.from('news').upsert(cleanNews, { onConflict: 'id' });
+      if (!error) details.news = cleanNews.length;
+    }
+
+    // 5. Sync campaign settings
+    if (payload.campaign_settings) {
+      const cs = payload.campaign_settings;
+      const { error } = await client.from('campaign_settings').upsert({
+        id: 1,
+        campaign_name: cs.campaign_name,
+        phase_name: cs.phase_name,
+        start_date: cs.start_date,
+        end_date: cs.end_date,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'id' });
+      if (!error) details.settings = 1;
+    }
+
+    return { success: true, details };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Lỗi đồng bộ Supabase' };
   }
 }

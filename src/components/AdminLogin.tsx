@@ -22,7 +22,7 @@ export default function AdminLogin() {
     const cleanUsername = username.trim();
 
     try {
-      // 1. Authenticate with backend SQLite / Cloudflare D1 API
+      // 1. Authenticate with backend API
       const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

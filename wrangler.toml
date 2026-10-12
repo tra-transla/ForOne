@@ -1,9 +1,0 @@
-name = "for1"
-main = "cloudflare_worker.js"
-compatibility_date = "2024-01-01"
-
-# Cấu hình D1 SQLite Database Binding
-[[d1_databases]]
-binding = "DB"
-database_name = "for1"
-database_id = "e029db72-1337-4b3f-8186-cba015d86e2f"

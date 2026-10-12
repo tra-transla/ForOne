@@ -357,7 +357,7 @@ export default function AdminDashboard() {
                   }`}
                 >
                   <Database size={18} />
-                  Aiven MySQL &amp; SQLite
+                  Cơ sở dữ liệu Supabase
                 </button>
               )}
             </>

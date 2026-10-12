@@ -18,92 +18,134 @@ import {
   HardDrive,
   ShieldAlert,
   SlidersHorizontal,
-  Link as LinkIcon
+  Link as LinkIcon,
+  CheckCircle,
+  XCircle,
+  HelpCircle,
+  RotateCcw
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
-  checkDatabaseStatus,
-  configureAivenMysql,
-  resetDatabaseConfig,
-  initDatabaseTables,
-  syncToAivenMysqlDb,
-  getStoredAivenConfig,
-  DatabaseDiagnosticResult,
-  AivenMysqlConfig
-} from '../lib/aivenMysql';
-import { syncAllLocalToCloudflare } from '../lib/schemaFallback';
+  getEffectiveSupabaseConfig,
+  setCustomSupabaseConfig,
+  clearCustomSupabaseConfig,
+  runSupabaseDiagnostics,
+  SupabaseDiagnosticResult,
+  DEFAULT_SUPABASE_URL,
+  DEFAULT_SUPABASE_ANON_KEY
+} from '../lib/supabase';
+import {
+  syncAllLocalToSupabase,
+  getLocalTeams,
+  getLocalRegistrations,
+  getLocalUsers,
+  getLocalNews
+} from '../lib/schemaFallback';
 
-const AIVEN_MYSQL_SCHEMA_SQL = `-- ==============================================================
--- BẢNG DỮ LIỆU CHUẨN AIVEN.IO MYSQL (INNODB / UTF8MB4)
+const SUPABASE_SCHEMA_SQL = `-- ==============================================================
+-- BẢNG DỮ LIỆU ĐẦY ĐỦ CHO HỆ THỐNG CAMPAIGN 2026 (SUPABASE POSTGRESQL)
+-- Chạy đoạn mã này trong: Supabase Dashboard -> SQL Editor -> New Query -> Run
 -- ==============================================================
 
--- 1. BẢNG USERS
+-- 1. BẢNG USERS (Tài khoản Quản trị & Điều hành)
 CREATE TABLE IF NOT EXISTS users (
-  id VARCHAR(100) PRIMARY KEY,
-  username VARCHAR(100) UNIQUE NOT NULL,
-  password VARCHAR(255) NOT NULL,
-  role VARCHAR(50) NOT NULL DEFAULT 'Quản trị',
-  is_locked TINYINT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'Quản trị',
+  is_locked BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
 
--- 2. BẢNG TEAMS
+-- Bổ sung cột is_locked nếu bảng đã tạo trước đó
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE;
+
+-- Thêm tài khoản quản trị mặc định nếu chưa tồn tại
+INSERT INTO users (username, password, role) VALUES 
+('admin', 'Sonla@2026', 'Quản trị'),
+('operator', 'operator123', 'Điều hành')
+ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password;
+
+-- 2. BẢNG TEAMS (Danh sách các đội được tạo và quản lý)
 CREATE TABLE IF NOT EXISTS teams (
-  id VARCHAR(100) PRIMARY KEY,
-  name VARCHAR(191) UNIQUE NOT NULL,
-  is_locked TINYINT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT UNIQUE NOT NULL,
+  is_locked BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
 
--- 3. BẢNG REGISTRATIONS
+-- Bổ sung cột is_locked nếu bảng đã tạo trước đó
+ALTER TABLE teams ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE;
+
+-- Thêm các team mặc định ban đầu
+INSERT INTO teams (name) VALUES 
+('Team 1: Leader Cá Kiếm'), 
+('Team 2: Leader Minato'), 
+('Team 3: Đấu giá'), 
+('Team 4: Vá lốp')
+ON CONFLICT (name) DO NOTHING;
+
+-- 3. BẢNG REGISTRATIONS (Danh sách thành viên đăng ký theo team)
 CREATE TABLE IF NOT EXISTS registrations (
-  id VARCHAR(100) PRIMARY KEY,
-  team VARCHAR(191) NOT NULL,
-  in_game_name VARCHAR(191) NOT NULL,
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team TEXT NOT NULL,
+  in_game_name TEXT NOT NULL,
   tanks TEXT NOT NULL,
-  is_winner TINYINT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  is_winner BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
 
--- 4. BẢNG NEWS
+-- Bổ sung cột is_winner nếu bảng đã tạo trước đó
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS is_winner BOOLEAN DEFAULT FALSE;
+
+-- 4. BẢNG NEWS (Tin tức & Thông báo chiến dịch)
 CREATE TABLE IF NOT EXISTS news (
-  id VARCHAR(100) PRIMARY KEY,
-  title VARCHAR(255) NOT NULL,
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
   content TEXT NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
 
--- 5. BẢNG CAMPAIGN_SETTINGS
+-- Thêm tin tức khởi động
+INSERT INTO news (title, content) VALUES
+('Thông báo: Khởi động sự kiện Campaign 2026', 'Chào mừng các chiến binh tham gia chiến dịch Spring Maneuvers 2026! Thời gian diễn ra từ 23/03/2026 đến 06/04/2026. Các đội vui lòng kiểm tra danh sách thành viên và chuẩn bị phương tiện tác chiến.'),
+('Quy định đăng ký & Chốt danh sách', 'Mỗi chiến binh đăng ký với tên In-Game chính xác và các xe sử dụng. Khi đội tuyển được Ban Quản Trị / Điều Hành chốt danh sách, thành viên mới sẽ không thể đăng ký thêm vào đội đó.')
+ON CONFLICT DO NOTHING;
+
+-- 5. BẢNG CAMPAIGN_SETTINGS (Cấu hình thời gian & thông tin chiến dịch)
 CREATE TABLE IF NOT EXISTS campaign_settings (
-  id INT PRIMARY KEY,
-  campaign_name VARCHAR(255) NOT NULL DEFAULT 'Campaign 2026',
-  phase_name VARCHAR(255) NOT NULL DEFAULT 'Spring Maneuvers',
-  start_date VARCHAR(50) NOT NULL DEFAULT '23/03/2026',
-  end_date VARCHAR(50) NOT NULL DEFAULT '06/04/2026',
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  id INT PRIMARY KEY DEFAULT 1,
+  campaign_name TEXT NOT NULL DEFAULT 'Campaign 2026',
+  phase_name TEXT NOT NULL DEFAULT 'Spring Maneuvers',
+  start_date TEXT NOT NULL DEFAULT '23/03/2026',
+  end_date TEXT NOT NULL DEFAULT '06/04/2026',
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
 
--- Khởi tạo tài khoản quản trị bảo mật (Khởi tạo tự động bởi hệ thống hoặc tùy biến):
--- INSERT IGNORE INTO users (id, username, password, role, is_locked) VALUES 
--- (UUID(), 'admin', 'MẬT_KHẨU_QUẢN_TRỊ_CỦA_BẠN', 'Quản trị', 0);
+INSERT INTO campaign_settings (id, campaign_name, phase_name, start_date, end_date)
+VALUES (1, 'Campaign 2026', 'Spring Maneuvers', '23/03/2026', '06/04/2026')
+ON CONFLICT (id) DO NOTHING;
 
--- Khởi tạo các đội tham chiến
-INSERT IGNORE INTO teams (id, name, is_locked, created_at) VALUES 
-('7b0f405f-acf3-4d11-b644-04ddd6bd2811', 'Team 1: Leader Cá Kiếm', 0, '2026-03-20 00:00:00'), 
-('0605a224-e5a8-49f1-a8fb-fc34016dc359', 'Team 2: Leader Minato', 0, '2026-03-20 00:01:00'), 
-('5d81c808-7438-4a3e-b814-280ee3c4c2ad', 'Team 3: Đấu giá', 0, '2026-03-20 00:02:00'), 
-('bd4bb1cd-1418-4927-a034-e7f5e17da04a', 'Team 4: Vá lốp', 0, '2026-03-20 00:03:00');
+-- 6. TẮT ROW LEVEL SECURITY (RLS) để Anon Key có thể truy vấn và thao tác
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE teams DISABLE ROW LEVEL SECURITY;
+ALTER TABLE registrations DISABLE ROW LEVEL SECURITY;
+ALTER TABLE news DISABLE ROW LEVEL SECURITY;
+ALTER TABLE campaign_settings DISABLE ROW LEVEL SECURITY;
 
--- Cài đặt chiến dịch
-INSERT IGNORE INTO campaign_settings (id, campaign_name, phase_name, start_date, end_date)
-VALUES (1, 'Campaign 2026', 'Spring Maneuvers', '23/03/2026', '06/04/2026');
+-- 7. CẤP QUYỀN ĐẦY ĐỦ CHO ROLE ANON VÀ AUTHENTICATED
+GRANT ALL ON TABLE users TO anon, authenticated;
+GRANT ALL ON TABLE teams TO anon, authenticated;
+GRANT ALL ON TABLE registrations TO anon, authenticated;
+GRANT ALL ON TABLE news TO anon, authenticated;
+GRANT ALL ON TABLE campaign_settings TO anon, authenticated;
 `;
 
 export default function DatabaseManager() {
   const { user } = useAuth();
   const [copied, setCopied] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [diagResult, setDiagResult] = useState<DatabaseDiagnosticResult | null>(null);
+  const [diagResult, setDiagResult] = useState<SupabaseDiagnosticResult | null>(null);
 
   const isAdmin = Boolean(
     user?.role === 'Quản trị' ||
@@ -113,39 +155,48 @@ export default function DatabaseManager() {
     (user?.role && user.role.toLowerCase().includes('admin'))
   );
 
-  // Configuration Mode: 'uri' | 'fields'
-  const [configMode, setConfigMode] = useState<'uri' | 'fields'>('uri');
-
-  // Aiven MySQL Credentials
-  const [uri, setUri] = useState('');
-  const [host, setHost] = useState('');
-  const [port, setPort] = useState('3306');
-  const [dbUser, setDbUser] = useState('avnadmin');
-  const [password, setPassword] = useState('');
-  const [database, setDatabase] = useState('defaultdb');
-  const [ssl, setSsl] = useState(true);
-
+  // Form State
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [anonKey, setAnonKey] = useState('');
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Actions
-  const [initializing, setInitializing] = useState(false);
-  const [initResult, setInitResult] = useState<string | null>(null);
+  // Sync State
   const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<{
+    success: boolean;
+    message: string;
+    counts?: { teams: number; regs: number; news: number; users: number; settings: number };
+  } | null>(null);
+
+  // Local Counts
+  const [localStats, setLocalStats] = useState({
+    teams: 0,
+    regs: 0,
+    users: 0,
+    news: 0
+  });
 
   useEffect(() => {
     if (!isAdmin) return;
-    const stored = getStoredAivenConfig();
-    if (stored.uri) setUri(stored.uri);
-    if (stored.host) setHost(stored.host);
-    if (stored.port) setPort(String(stored.port));
-    if (stored.user) setDbUser(stored.user);
-    if (stored.database) setDatabase(stored.database);
-    if (stored.ssl !== undefined) setSsl(stored.ssl);
+    const cfg = getEffectiveSupabaseConfig();
+    setSupabaseUrl(cfg.url);
+    setAnonKey(cfg.key);
 
-    loadStatus();
+    updateLocalStats();
+    handleTestConnection(cfg.url, cfg.key);
   }, [isAdmin]);
+
+  const updateLocalStats = () => {
+    try {
+      setLocalStats({
+        teams: getLocalTeams().length,
+        regs: getLocalRegistrations().length,
+        users: getLocalUsers().length,
+        news: getLocalNews().length
+      });
+    } catch {}
+  };
 
   if (!isAdmin) {
     return (
@@ -153,26 +204,24 @@ export default function DatabaseManager() {
         <ShieldAlert className="mx-auto text-amber-500 mb-3" size={40} />
         <h3 className="text-lg font-bold text-zinc-900">Không có quyền truy cập</h3>
         <p className="text-sm text-zinc-500 mt-1">
-          Mục cấu hình Cơ sở dữ liệu Aiven MySQL chỉ dành riêng cho tài khoản Quản trị viên.
+          Mục cấu hình Cơ sở dữ liệu Supabase chỉ dành riêng cho tài khoản Quản trị viên.
         </p>
       </div>
     );
   }
 
-  const loadStatus = async () => {
+  const handleTestConnection = async (urlToCheck?: string, keyToCheck?: string) => {
     setTesting(true);
-    setInitResult(null);
     try {
-      const res = await checkDatabaseStatus();
+      const res = await runSupabaseDiagnostics(urlToCheck || supabaseUrl, keyToCheck || anonKey);
       setDiagResult(res);
-      if (res.activeConfig?.host && !host) {
-        setHost(res.activeConfig.host);
-      }
-      if (res.activeConfig?.port && port === '3306') {
-        setPort(String(res.activeConfig.port));
-      }
-    } catch {
-      // fallback handled
+    } catch (err: any) {
+      setDiagResult({
+        ok: false,
+        code: 'NETWORK_ERROR',
+        url: urlToCheck || supabaseUrl,
+        message: 'Lỗi kiểm tra kết nối: ' + (err.message || String(err))
+      });
     } finally {
       setTesting(false);
     }
@@ -182,429 +231,472 @@ export default function DatabaseManager() {
     e.preventDefault();
     setSaveError(null);
     setSaveSuccess(false);
-    setTesting(true);
 
-    let configPayload: AivenMysqlConfig;
+    const cleanUrl = supabaseUrl.trim();
+    const cleanKey = anonKey.trim();
 
-    if (configMode === 'uri') {
-      if (!uri.trim()) {
-        setSaveError('Vui lòng nhập Service URI của Aiven MySQL.');
-        setTesting(false);
-        return;
-      }
-      configPayload = { uri: uri.trim(), ssl: true };
-    } else {
-      if (!host.trim() || !dbUser.trim() || !password.trim()) {
-        setSaveError('Vui lòng điền đầy đủ Host, User và Mật khẩu Aiven.');
-        setTesting(false);
-        return;
-      }
-      configPayload = {
-        host: host.trim(),
-        port: port ? Number(port) : 3306,
-        user: dbUser.trim(),
-        password: password,
-        database: database.trim() || 'defaultdb',
-        ssl: ssl
-      };
-    }
-
-    const res = await configureAivenMysql(configPayload);
-    setTesting(false);
-
-    if (res.success) {
-      setSaveSuccess(true);
-      await loadStatus();
-      setTimeout(() => setSaveSuccess(false), 5000);
-    } else {
-      setSaveError(res.error || 'Kết nối Aiven MySQL thất bại');
-    }
-  };
-
-  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
-
-  const handleResetToSqlite = async () => {
-    if (!confirmDisconnect) {
-      setConfirmDisconnect(true);
-      setTimeout(() => setConfirmDisconnect(false), 4000);
+    if (!cleanUrl) {
+      setSaveError('Vui lòng nhập Supabase Project URL.');
       return;
     }
-    setConfirmDisconnect(false);
-    await resetDatabaseConfig();
-    setUri('');
-    setPassword('');
-    await loadStatus();
-  };
 
-  const handleInitTables = async () => {
-    setInitializing(true);
-    setInitResult(null);
-    const res = await initDatabaseTables();
-    setInitializing(false);
-
-    if (res.success) {
-      setInitResult(res.message || 'Khởi tạo thành công toàn bộ các bảng trên Aiven MySQL!');
-      await loadStatus();
-    } else {
-      setSaveError(res.error || 'Khởi tạo bảng thất bại');
+    if (!cleanKey) {
+      setSaveError('Vui lòng nhập Supabase Anon / Public Key.');
+      return;
     }
+
+    setCustomSupabaseConfig(cleanUrl, cleanKey);
+    setSaveSuccess(true);
+    await handleTestConnection(cleanUrl, cleanKey);
+    setTimeout(() => setSaveSuccess(false), 4000);
   };
 
-  const handleSyncToAiven = async () => {
+  const handleResetToDefault = async () => {
+    clearCustomSupabaseConfig();
+    setSupabaseUrl(DEFAULT_SUPABASE_URL);
+    setAnonKey(DEFAULT_SUPABASE_ANON_KEY);
+    setSaveSuccess(true);
+    await handleTestConnection(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY);
+    setTimeout(() => setSaveSuccess(false), 3000);
+  };
+
+  const handleSyncToSupabase = async () => {
     setSyncing(true);
     setSyncResult(null);
-    try {
-      const res = await syncAllLocalToCloudflare();
-      if (res.success) {
-        setSyncResult(`Đã đồng bộ thành công sang Aiven MySQL: ${res.count.teams} Đội, ${res.count.regs} Đăng ký, ${res.count.news} Tin tức!`);
-        await loadStatus();
-      } else {
-        setSaveError(res.error || 'Đồng bộ thất bại');
-      }
-    } catch (err: any) {
-      setSaveError(err.message || 'Lỗi khi đồng bộ dữ liệu');
-    } finally {
-      setSyncing(false);
+
+    const res = await syncAllLocalToSupabase();
+    setSyncing(false);
+
+    if (res.success) {
+      setSyncResult({
+        success: true,
+        message: 'Đồng bộ thành công dữ liệu sang Supabase Cloud Database!',
+        counts: res.count
+      });
+      await handleTestConnection();
+    } else {
+      setSyncResult({
+        success: false,
+        message: res.error || 'Đồng bộ dữ liệu sang Supabase thất bại. Vui lòng kiểm tra lại kết nối và bảng dữ liệu.'
+      });
     }
   };
 
-  const copySql = () => {
-    navigator.clipboard.writeText(AIVEN_MYSQL_SCHEMA_SQL);
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SUPABASE_SCHEMA_SQL);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   return (
-    <div className="space-y-8">
-      {/* 1. Status Banner */}
-      <div className="bg-gradient-to-r from-zinc-900 via-blue-950/40 to-cyan-950/30 rounded-2xl shadow-sm border border-cyan-500/20 p-6 text-white">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-cyan-500 text-zinc-950 p-3 rounded-xl font-bold shadow-md">
-              <Database size={24} />
+    <div className="space-y-6">
+      {/* Header Banner */}
+      <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-zinc-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden border border-emerald-800/40">
+        <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-emerald-500/10 blur-3xl rounded-full pointer-events-none" />
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-xs font-semibold backdrop-blur-sm border border-emerald-500/30">
+              <Database size={13} />
+              Cơ sở dữ liệu đám mây Supabase PostgreSQL
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-bold text-white">Aiven.io Cloud MySQL</h2>
-                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                  MySQL v8.0 / TLS
-                </span>
-              </div>
-              <p className="text-xs text-zinc-300 mt-1">
-                Hệ thống lưu trữ trên cơ sở dữ liệu quan hệ điện toán đám mây Aiven.io MySQL với cơ chế dự phòng an toàn SQLite.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={loadStatus}
-              disabled={testing}
-              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-medium text-xs transition-colors border border-zinc-700 shadow-sm cursor-pointer"
-            >
-              <RefreshCw size={14} className={testing ? "animate-spin" : ""} />
-              <span>{testing ? 'Đang kiểm tra...' : 'Kiểm tra trạng thái'}</span>
-            </button>
-            <button
-              onClick={handleInitTables}
-              disabled={initializing}
-              className="flex items-center gap-2 px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-zinc-950 rounded-xl font-bold text-xs transition-all shadow-md active:scale-95 cursor-pointer"
-            >
-              <Sparkles size={14} className={initializing ? "animate-spin" : ""} />
-              <span>{initializing ? 'Đang tạo bảng...' : '1-Click Khởi tạo bảng'}</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Diagnostic Status Box */}
-        {diagResult && (
-          <div className="mt-6 pt-5 border-t border-zinc-800 grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
-            <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800">
-              <div className="text-zinc-400 text-[11px] mb-1 font-medium">Động cơ cơ sở dữ liệu:</div>
-              <div className="font-semibold text-cyan-400 flex items-center gap-1.5">
-                <CheckCircle2 size={14} />
-                <span>{diagResult.engine}</span>
-              </div>
-            </div>
-
-            <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800">
-              <div className="text-zinc-400 text-[11px] mb-1 font-medium">Trạng thái kết nối Aiven:</div>
-              <div className="font-semibold text-zinc-100 flex items-center gap-1.5">
-                {diagResult.connected ? (
-                  <>
-                    <Cloud size={14} className="text-emerald-400" />
-                    <span className="text-emerald-300">Đã kết nối (Cloud Active)</span>
-                  </>
-                ) : (
-                  <>
-                    <HardDrive size={14} className="text-amber-400" />
-                    <span className="text-amber-300">Đang chạy SQLite dự phòng</span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800">
-              <div className="text-zinc-400 text-[11px] mb-1 font-medium">Tổng bản ghi trong DB:</div>
-              <div className="font-semibold text-zinc-200">
-                {diagResult.stats ? (
-                  <span>
-                    {diagResult.stats.teams ?? 0} Đội • {diagResult.stats.registrations ?? 0} Đăng ký • {diagResult.stats.news ?? 0} Tin
-                  </span>
-                ) : (
-                  'Chưa có dữ liệu'
-                )}
-              </div>
-            </div>
-
-            <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800">
-              <div className="text-zinc-400 text-[11px] mb-1 font-medium">Tài khoản Quản trị:</div>
-              <div className="font-semibold text-emerald-300">
-                {diagResult.stats?.users ? `${diagResult.stats.users} tài khoản` : 'Đã bảo vệ'}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {initResult && (
-          <div className="mt-4 p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
-            <CheckCircle2 size={16} />
-            <span>{initResult}</span>
-          </div>
-        )}
-
-        {syncResult && (
-          <div className="mt-4 p-3 bg-cyan-950/60 border border-cyan-500/40 rounded-xl text-cyan-300 text-xs flex items-center gap-2">
-            <CheckCircle2 size={16} />
-            <span>{syncResult}</span>
-          </div>
-        )}
-      </div>
-
-      {/* 2. Aiven MySQL Connection Setup Box */}
-      <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 p-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-zinc-100">
-          <div className="flex items-center gap-3">
-            <div className="bg-cyan-100 text-cyan-800 p-2.5 rounded-xl">
-              <Server size={22} />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-zinc-900">Cấu hình kết nối Aiven.io MySQL</h2>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                Nhập Service URI hoặc thông số máy chủ từ Aiven Console để hệ thống ghi dữ liệu lên Cloud.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleSyncToAiven}
-              disabled={syncing}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-            >
-              <UploadCloud size={14} className={syncing ? "animate-spin" : ""} />
-              <span>{syncing ? 'Đang đồng bộ...' : 'Đồng bộ dữ liệu sang MySQL'}</span>
-            </button>
-            {diagResult?.connected && (
-              <button
-                onClick={handleResetToSqlite}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                  confirmDisconnect
-                    ? 'bg-red-600 text-white hover:bg-red-700 animate-pulse'
-                    : 'bg-red-50 hover:bg-red-100 text-red-600'
-                }`}
-              >
-                {confirmDisconnect ? 'Xác nhận ngắt kết nối?' : 'Ngắt kết nối'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Tab switch mode */}
-        <div className="flex gap-2 mb-6 border-b border-zinc-100 pb-2">
-          <button
-            type="button"
-            onClick={() => setConfigMode('uri')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
-              configMode === 'uri'
-                ? 'bg-cyan-100 text-cyan-900'
-                : 'text-zinc-600 hover:bg-zinc-100'
-            }`}
-          >
-            <LinkIcon size={14} />
-            Service URI (Khuyên dùng - Nhanh nhất)
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfigMode('fields')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
-              configMode === 'fields'
-                ? 'bg-cyan-100 text-cyan-900'
-                : 'text-zinc-600 hover:bg-zinc-100'
-            }`}
-          >
-            <SlidersHorizontal size={14} />
-            Thông số chi tiết (Host, Port, User...)
-          </button>
-        </div>
-
-        <form onSubmit={handleSaveConfig} className="space-y-4">
-          {configMode === 'uri' ? (
-            <div>
-              <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                Aiven MySQL Service URI <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={uri}
-                  onChange={(e) => setUri(e.target.value)}
-                  placeholder="mysql://avnadmin:your_password@mysql-project.aivencloud.com:12345/defaultdb?ssl-mode=REQUIRED"
-                  className="w-full px-3.5 py-2.5 bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-mono text-zinc-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-              <p className="text-[11px] text-zinc-500 mt-1.5">
-                💡 Lấy Service URI trực tiếp trong <strong>Aiven Console</strong> &rarr; Service <strong>MySQL</strong> &rarr; Tab <strong>Overview</strong> &rarr; <strong>Service URI</strong>.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                  Host / Server Address <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={host}
-                  onChange={(e) => setHost(e.target.value)}
-                  placeholder="mysql-project-xxxx.aivencloud.com"
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-mono text-zinc-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                  Port
-                </label>
-                <input
-                  type="text"
-                  value={port}
-                  onChange={(e) => setPort(e.target.value)}
-                  placeholder="12345"
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-mono text-zinc-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                  Database Name
-                </label>
-                <input
-                  type="text"
-                  value={database}
-                  onChange={(e) => setDatabase(e.target.value)}
-                  placeholder="defaultdb"
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-mono text-zinc-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                  User <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={dbUser}
-                  onChange={(e) => setDbUser(e.target.value)}
-                  placeholder="avnadmin"
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-xl text-sm font-mono text-zinc-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-zinc-700 uppercase tracking-wider mb-1">
-                  Password <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Mật khẩu Aiven..."
-                  className="w-full px-3 py-2 bg-zinc-50 border border-zinc-300 rounded-xl text-sm text-zinc-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                />
-              </div>
-            </div>
-          )}
-
-          {saveError && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
-              <AlertTriangle size={16} className="shrink-0" />
-              <span>{saveError}</span>
-            </div>
-          )}
-
-          {saveSuccess && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-center gap-2">
-              <CheckCircle2 size={16} className="shrink-0" />
-              <span>Đã kết nối thành công tới Aiven MySQL! Hệ thống đang đọc ghi trực tiếp qua Aiven.io Cloud.</span>
-            </div>
-          )}
-
-          <div className="pt-2 flex items-center justify-between">
-            <div className="text-xs text-zinc-500">
-              {diagResult?.connected ? (
-                <span className="text-emerald-600 font-semibold flex items-center gap-1">
-                  <Check size={14} /> Đang kết nối Aiven MySQL
-                </span>
-              ) : (
-                <span className="text-amber-600 font-medium">
-                  Đang dùng SQLite cục bộ
-                </span>
-              )}
-            </div>
-
-            <button
-              type="submit"
-              disabled={testing}
-              className="px-5 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs transition-colors shadow-sm flex items-center gap-2 cursor-pointer disabled:opacity-50"
-            >
-              {testing ? <RefreshCw size={14} className="animate-spin" /> : <Database size={14} />}
-              <span>{testing ? 'Đang kiểm tra...' : 'Lưu & Kết nối Aiven MySQL'}</span>
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* 3. MySQL Schema Script Viewer */}
-      <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 p-6">
-        <div className="flex items-center justify-between mb-4 pb-3 border-b border-zinc-100">
-          <div>
-            <h3 className="text-lg font-bold text-zinc-900">Mã SQL Khởi tạo Aiven MySQL Schema</h3>
-            <p className="text-xs text-zinc-500">
-              Chuẩn hóa riêng cho MySQL (InnoDB, UTF-8 MB4, Timestamp tự động).
+            <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+              Quản Lý Cơ Sở Dữ Liệu Supabase
+            </h2>
+            <p className="text-zinc-300 text-sm max-w-2xl leading-relaxed">
+              Hệ thống sử dụng cơ sở dữ liệu Supabase đám mây cho toàn bộ Teams, Đăng ký, Tin tức, Cấu hình chiến dịch và Tài khoản Quản trị. Có tích hợp cơ chế lưu trữ dự phòng tự động (Local SQLite & Cache) đảm bảo ứng dụng không bao giờ bị gián đoạn.
             </p>
           </div>
+
+          <div className="flex flex-col sm:flex-row gap-3">
+            <button
+              onClick={() => handleTestConnection()}
+              disabled={testing}
+              className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold rounded-xl text-sm transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw size={16} className={testing ? 'animate-spin' : ''} />
+              {testing ? 'Đang kiểm tra...' : 'Kiểm tra kết nối'}
+            </button>
+            <a
+              href="https://supabase.com/dashboard"
+              target="_blank"
+              rel="noreferrer"
+              className="px-4 py-2.5 bg-zinc-800/90 hover:bg-zinc-700 text-white font-medium rounded-xl text-sm transition-all border border-zinc-700/60 flex items-center justify-center gap-2"
+            >
+              <ExternalLink size={15} />
+              Supabase Dashboard
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* Connection Status Card */}
+      {diagResult && (
+        <div
+          className={`p-6 rounded-2xl border transition-all ${
+            diagResult.ok
+              ? 'bg-emerald-50/80 border-emerald-200 text-emerald-900'
+              : diagResult.code === 'TABLE_ERROR'
+              ? 'bg-amber-50/80 border-amber-200 text-amber-900'
+              : 'bg-zinc-50 border-zinc-300 text-zinc-900'
+          }`}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div
+                className={`p-2.5 rounded-xl mt-0.5 ${
+                  diagResult.ok
+                    ? 'bg-emerald-500 text-white'
+                    : diagResult.code === 'TABLE_ERROR'
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-red-500 text-white'
+                }`}
+              >
+                {diagResult.ok ? (
+                  <CheckCircle2 size={24} />
+                ) : diagResult.code === 'TABLE_ERROR' ? (
+                  <AlertTriangle size={24} />
+                ) : (
+                  <XCircle size={24} />
+                )}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-bold text-base">
+                    {diagResult.ok
+                      ? 'Kết nối Supabase Cloud Database: HOẠT ĐỘNG HOÀN HẢO'
+                      : diagResult.code === 'TABLE_ERROR'
+                      ? 'Kết nối Supabase thành công - Cần khởi tạo bảng'
+                      : diagResult.code === 'PAUSED_OR_DNS_ERROR'
+                      ? 'Dự án Supabase đang Tạm Dừng hoặc Chưa kết nối được'
+                      : 'Trạng thái kết nối Supabase'}
+                  </h3>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                      diagResult.ok
+                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                        : diagResult.code === 'TABLE_ERROR'
+                        ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                        : 'bg-red-100 text-red-800 border border-red-300'
+                    }`}
+                  >
+                    {diagResult.code}
+                  </span>
+                  {diagResult.latencyMs !== undefined && (
+                    <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-zinc-200/80 text-zinc-800 font-semibold">
+                      ⚡ {diagResult.latencyMs}ms
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm opacity-90 leading-relaxed max-w-3xl">
+                  {diagResult.message}
+                </p>
+                <div className="text-xs opacity-75 font-mono pt-1">
+                  Target: {diagResult.url}
+                </div>
+              </div>
+            </div>
+
+            <div className="text-xs bg-white/80 backdrop-blur px-3 py-2 rounded-xl border border-zinc-200 self-start sm:self-auto shrink-0 shadow-sm">
+              <div className="text-zinc-500 font-medium">Cơ chế vận hành:</div>
+              <div className="font-bold text-zinc-800 flex items-center gap-1.5 mt-0.5">
+                <span className={`w-2 h-2 rounded-full ${diagResult.ok ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                {diagResult.ok ? 'Supabase Trực Tiếp (Realtime Cloud)' : 'SQLite / Local Cache (Dự phòng)'}
+              </div>
+            </div>
+          </div>
+
+          {/* Tables checklist if table details available */}
+          {diagResult.tables && (
+            <div className="mt-5 pt-4 border-t border-zinc-200/60 grid grid-cols-2 sm:grid-cols-5 gap-3">
+              {[
+                { name: 'teams', label: 'Bảng Đội tuyển (teams)', ok: diagResult.tables.teams, count: diagResult.counts?.teams },
+                { name: 'registrations', label: 'Bảng Đăng ký (registrations)', ok: diagResult.tables.registrations, count: diagResult.counts?.registrations },
+                { name: 'users', label: 'Bảng Quản trị (users)', ok: diagResult.tables.users, count: diagResult.counts?.users },
+                { name: 'news', label: 'Bảng Tin tức (news)', ok: diagResult.tables.news, count: diagResult.counts?.news },
+                { name: 'campaign_settings', label: 'Cấu hình sự kiện', ok: diagResult.tables.campaign_settings }
+              ].map(tb => (
+                <div
+                  key={tb.name}
+                  className={`p-2.5 rounded-xl text-xs flex items-center justify-between border ${
+                    tb.ok
+                      ? 'bg-emerald-100/60 border-emerald-300/80 text-emerald-900'
+                      : 'bg-red-50 border-red-200 text-red-900'
+                  }`}
+                >
+                  <div className="truncate pr-1">
+                    <div className="font-bold truncate">{tb.name}</div>
+                    {tb.count !== undefined && (
+                      <div className="text-[10px] opacity-75">{tb.count} bản ghi</div>
+                    )}
+                  </div>
+                  {tb.ok ? (
+                    <CheckCircle className="text-emerald-600 shrink-0" size={16} />
+                  ) : (
+                    <XCircle className="text-red-500 shrink-0" size={16} />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Main Grid: Config Form & Sync / Guide */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Supabase Credentials Form (7 cols) */}
+        <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                <SlidersHorizontal size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-zinc-900 text-lg">Cấu hình kết nối Supabase</h3>
+                <p className="text-xs text-zinc-500">Dán Project URL và Anon Key từ Supabase Project Settings</p>
+              </div>
+            </div>
+            <button
+              onClick={handleResetToDefault}
+              className="text-xs text-zinc-500 hover:text-zinc-800 flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-zinc-200 hover:bg-zinc-50 transition cursor-pointer"
+              title="Đặt lại URL và Key mặc định"
+            >
+              <RotateCcw size={13} />
+              Mặc định
+            </button>
+          </div>
+
+          <form onSubmit={handleSaveConfig} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
+                Supabase Project URL
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-400">
+                  <LinkIcon size={16} />
+                </div>
+                <input
+                  type="text"
+                  value={supabaseUrl}
+                  onChange={e => setSupabaseUrl(e.target.value)}
+                  placeholder="https://xyzcompany.supabase.co"
+                  className="w-full pl-9 pr-3 py-2.5 text-sm bg-zinc-50 border border-zinc-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-mono"
+                />
+              </div>
+              <p className="text-[11px] text-zinc-400 mt-1">
+                Lấy từ: Supabase Dashboard → Project Settings → Configuration → API → <b>Project URL</b>
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-zinc-700 uppercase tracking-wider mb-1.5">
+                Supabase Anon / Public Key (API Key)
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-400">
+                  <Key size={16} />
+                </div>
+                <textarea
+                  rows={3}
+                  value={anonKey}
+                  onChange={e => setAnonKey(e.target.value)}
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-zinc-50 border border-zinc-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 font-mono"
+                />
+              </div>
+              <p className="text-[11px] text-zinc-400 mt-1">
+                Lấy từ: Supabase Dashboard → Project Settings → Configuration → API → <b>Project API keys (anon public)</b>
+              </p>
+            </div>
+
+            {saveError && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center gap-2">
+                <AlertTriangle size={16} className="shrink-0" />
+                {saveError}
+              </div>
+            )}
+
+            {saveSuccess && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs flex items-center gap-2 font-medium">
+                <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
+                Đã lưu cấu hình kết nối Supabase thành công!
+              </div>
+            )}
+
+            <div className="pt-2 flex flex-col sm:flex-row gap-3">
+              <button
+                type="submit"
+                disabled={testing}
+                className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-sm transition-all shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <Database size={16} />
+                Lưu cấu hình Supabase
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTestConnection()}
+                disabled={testing}
+                className="py-2.5 px-4 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 font-semibold rounded-xl text-sm transition cursor-pointer flex items-center justify-center gap-2"
+              >
+                <RefreshCw size={15} className={testing ? 'animate-spin' : ''} />
+                Kiểm tra kết nối
+              </button>
+            </div>
+          </form>
+
+          {/* Quick Help Card */}
+          <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200 space-y-2 text-xs text-zinc-600">
+            <div className="font-bold text-zinc-800 flex items-center gap-1.5">
+              <HelpCircle size={15} className="text-emerald-600" />
+              Lưu ý về tài khoản Supabase Free Tier:
+            </div>
+            <ul className="list-disc list-inside space-y-1 text-zinc-500">
+              <li>Dự án miễn phí của Supabase tự động tạm dừng (Pause) sau 7 ngày không có truy cập.</li>
+              <li>Nếu dự án bị tạm dừng, bạn chỉ cần vào Supabase Console và nhấn <b>"Restore Project"</b> (Khôi phục) trong 1 phút là hoạt động lại bình thường.</li>
+              <li>Hoặc bạn có thể tạo một dự án mới hoàn toàn miễn phí trên Supabase và dán Project URL & Key vào đây.</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Right Column: Sync & Local DB Stats (5 cols) */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Data Sync Card */}
+          <div className="bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm space-y-5">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                <UploadCloud size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-zinc-900 text-lg">Đồng bộ dữ liệu sang Supabase</h3>
+                <p className="text-xs text-zinc-500">Đẩy toàn bộ dữ liệu hiện có lên Supabase Cloud</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-center">
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200">
+                <div className="text-xs text-zinc-500">Đội tuyển (Teams)</div>
+                <div className="text-lg font-extrabold text-zinc-800">{localStats.teams}</div>
+              </div>
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200">
+                <div className="text-xs text-zinc-500">Đăng ký (Regs)</div>
+                <div className="text-lg font-extrabold text-zinc-800">{localStats.regs}</div>
+              </div>
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200">
+                <div className="text-xs text-zinc-500">Tin tức (News)</div>
+                <div className="text-lg font-extrabold text-zinc-800">{localStats.news}</div>
+              </div>
+              <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200">
+                <div className="text-xs text-zinc-500">Tài khoản (Users)</div>
+                <div className="text-lg font-extrabold text-zinc-800">{localStats.users}</div>
+              </div>
+            </div>
+
+            {syncResult && (
+              <div
+                className={`p-3.5 rounded-xl text-xs flex items-start gap-2 border ${
+                  syncResult.success
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-red-50 border-red-200 text-red-800'
+                }`}
+              >
+                {syncResult.success ? (
+                  <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertTriangle size={18} className="text-red-500 shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <div className="font-bold">{syncResult.message}</div>
+                  {syncResult.counts && (
+                    <div className="mt-1 text-[11px] opacity-80">
+                      Đã đồng bộ: {syncResult.counts.teams} teams, {syncResult.counts.regs} đăng ký, {syncResult.counts.news} tin tức, {syncResult.counts.users} tài khoản.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={handleSyncToSupabase}
+              disabled={syncing}
+              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-sm transition-all shadow-md shadow-indigo-600/20 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              <UploadCloud size={18} className={syncing ? 'animate-bounce' : ''} />
+              {syncing ? 'Đang đồng bộ dữ liệu...' : 'Đồng bộ toàn bộ dữ liệu lên Supabase'}
+            </button>
+          </div>
+
+          {/* SQLite Backup Status */}
+          <div className="bg-white p-6 rounded-2xl border border-zinc-200 shadow-sm space-y-3">
+            <div className="flex items-center gap-2">
+              <HardDrive size={18} className="text-zinc-600" />
+              <h4 className="font-bold text-zinc-900 text-sm">Cơ chế lưu trữ dự phòng (Fallback)</h4>
+            </div>
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              Mỗi thao tác tạo đội, đăng ký, đăng tin hay quản lý tài khoản đều được tự động lưu song song vào <b>SQLite</b> và <b>LocalStorage</b>. Khi mạng chập chờn hoặc Supabase đang tạm dừng, người dùng vẫn có thể xem và đăng ký liền mạch mà không bị lỗi.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* SQL Setup Script Section */}
+      <div className="bg-white p-6 sm:p-8 rounded-2xl border border-zinc-200 shadow-sm space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl">
+              <FileCode size={22} />
+            </div>
+            <div>
+              <h3 className="font-bold text-zinc-900 text-lg">Mã SQL khởi tạo toàn bộ bảng trên Supabase</h3>
+              <p className="text-xs text-zinc-500">Chạy đoạn mã này trong Supabase Dashboard → SQL Editor</p>
+            </div>
+          </div>
           <button
-            onClick={copySql}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-800 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+            onClick={handleCopySql}
+            className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer shadow-sm ${
+              copied
+                ? 'bg-emerald-600 text-white'
+                : 'bg-zinc-900 hover:bg-zinc-800 text-white'
+            }`}
           >
-            {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
-            <span>{copied ? 'Đã sao chép!' : 'Sao chép SQL'}</span>
+            {copied ? <Check size={15} /> : <Copy size={15} />}
+            {copied ? 'Đã sao chép SQL!' : 'Sao chép toàn bộ mã SQL'}
           </button>
         </div>
 
-        <div className="relative">
-          <pre className="bg-zinc-950 text-cyan-300 p-4 rounded-xl text-xs font-mono overflow-x-auto max-h-72 border border-zinc-800">
-            {AIVEN_MYSQL_SCHEMA_SQL}
-          </pre>
+        {/* 4-Step Instructions */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+          <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-1">
+            <span className="font-bold text-emerald-600">Bước 1:</span>
+            <div className="text-zinc-700">Mở Supabase Project của bạn tại <a href="https://supabase.com" target="_blank" rel="noreferrer" className="underline font-semibold">supabase.com</a>.</div>
+          </div>
+          <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-1">
+            <span className="font-bold text-emerald-600">Bước 2:</span>
+            <div className="text-zinc-700">Bấm vào mục <b>SQL Editor</b> ở menu bên trái.</div>
+          </div>
+          <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-1">
+            <span className="font-bold text-emerald-600">Bước 3:</span>
+            <div className="text-zinc-700">Tạo New Query, dán toàn bộ đoạn mã SQL bên dưới và nhấn <b>Run</b>.</div>
+          </div>
+          <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-200 space-y-1">
+            <span className="font-bold text-emerald-600">Bước 4:</span>
+            <div className="text-zinc-700">Copy <b>URL</b> & <b>Anon Key</b> vào mục Cấu hình phía trên và bấm Lưu.</div>
+          </div>
         </div>
 
-        <div className="mt-4 p-4 bg-zinc-50 rounded-xl text-xs text-zinc-600 space-y-2 border border-zinc-200">
-          <div className="font-bold text-zinc-800">Hướng dẫn nhanh cấu hình với Aiven.io:</div>
-          <div>1. Đăng ký/Đăng nhập tại <a href="https://console.aiven.io" target="_blank" rel="noreferrer" className="text-cyan-700 underline font-medium inline-flex items-center gap-0.5">console.aiven.io <ExternalLink size={10} /></a>.</div>
-          <div>2. Chọn dịch vụ <strong>MySQL</strong> (hoặc bấm <strong>Create Service</strong> &rarr; chọn MySQL &rarr; Free plan hoặc Developer plan).</div>
-          <div>3. Trong trang <strong>Overview</strong> của dịch vụ, sao chép chuỗi <strong>Service URI</strong>.</div>
-          <div>4. Dán chuỗi đó vào ô <strong>Service URI</strong> ở trên và nhấn <strong>Lưu & Kết nối Aiven MySQL</strong>. Hệ thống sẽ tự động tạo bảng và đồng bộ dữ liệu.</div>
+        {/* Code viewer */}
+        <div className="relative rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950">
+          <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800 text-xs text-zinc-400">
+            <span className="font-mono">supabase_schema_setup.sql (PostgreSQL)</span>
+            <button
+              onClick={handleCopySql}
+              className="text-zinc-300 hover:text-white flex items-center gap-1 cursor-pointer"
+            >
+              {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
+              {copied ? 'Đã copy' : 'Copy'}
+            </button>
+          </div>
+          <pre className="p-4 text-xs font-mono text-zinc-300 overflow-x-auto max-h-96 leading-relaxed select-all">
+            {SUPABASE_SCHEMA_SQL}
+          </pre>
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { getApiBaseUrl } from './cloudflareD1';
+import { supabase } from './supabase';
 
 export interface CampaignSettings {
   campaign_name: string;
@@ -35,9 +35,26 @@ export const getStoredCampaignSettings = (): CampaignSettings => {
 };
 
 export const fetchCampaignSettings = async (): Promise<CampaignSettings> => {
+  // 1. Primary: Supabase Cloud Database
   try {
-    const baseUrl = getApiBaseUrl();
-    const res = await fetch(`${baseUrl}/api/campaign-settings`);
+    const { data, error } = await supabase.from('campaign_settings').select('*').limit(1).maybeSingle();
+    if (!error && data && data.campaign_name) {
+      const settings: CampaignSettings = {
+        campaign_name: data.campaign_name,
+        phase_name: data.phase_name,
+        start_date: data.start_date,
+        end_date: data.end_date,
+      };
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(settings));
+      return settings;
+    }
+  } catch (err) {
+    console.warn('Supabase fetchCampaignSettings error, using local fallback:', err);
+  }
+
+  // 2. Secondary: Local server backup API
+  try {
+    const res = await fetch('/api/campaign-settings');
     if (res.ok) {
       const data = await res.json();
       if (data && data.campaign_name) {
@@ -61,7 +78,7 @@ export const fetchCampaignSettings = async (): Promise<CampaignSettings> => {
 export const saveCampaignSettings = async (
   settings: CampaignSettings
 ): Promise<{ success: boolean; error?: string }> => {
-  // Always update localStorage first
+  // 1. Update localStorage cache
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(settings));
     window.dispatchEvent(
@@ -71,10 +88,23 @@ export const saveCampaignSettings = async (
     console.warn('Failed to save campaign settings to localStorage', err);
   }
 
-  // Update backend SQLite / Cloudflare D1
+  // 2. Save directly to Supabase Cloud Database
   try {
-    const baseUrl = getApiBaseUrl();
-    const res = await fetch(`${baseUrl}/api/campaign-settings`, {
+    await supabase.from('campaign_settings').upsert({
+      id: 1,
+      campaign_name: settings.campaign_name,
+      phase_name: settings.phase_name,
+      start_date: settings.start_date,
+      end_date: settings.end_date,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('Supabase saveCampaignSettings error:', err);
+  }
+
+  // 3. Save to local server SQLite backup
+  try {
+    const res = await fetch('/api/campaign-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(settings)
@@ -85,6 +115,6 @@ export const saveCampaignSettings = async (
     }
     return { success: true };
   } catch (err: any) {
-    return { success: true }; // LocalStorage saved
+    return { success: true }; // LocalStorage & Supabase handled
   }
 };
