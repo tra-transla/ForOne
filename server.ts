@@ -4,7 +4,17 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import jwt from 'jsonwebtoken';
 import path from 'path';
-import { getLocalSqlite, queryCloudflareD1, initCloudflareD1Schema } from './server_db';
+import { getLocalSqlite, initSqliteSchema } from './server_db';
+import {
+  isAivenMysqlConfigured,
+  queryAivenMysql,
+  testAivenMysqlConnection,
+  initAivenMysqlSchema,
+  saveAivenMysqlConfig,
+  clearAivenMysqlConfig,
+  getActiveAivenMysqlConfig,
+  syncDatasetToAivenMysql
+} from './server_mysql';
 
 const app = express();
 const PORT = 3000;
@@ -14,81 +24,39 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(cors());
 
-// Cloudflare D1 environment configuration or memory config
-let activeCfConfig = {
-  accountId: process.env.CLOUDFLARE_ACCOUNT_ID || '',
-  databaseId: process.env.CLOUDFLARE_D1_DATABASE_ID || '',
-  apiToken: process.env.CLOUDFLARE_API_TOKEN || ''
-};
-
-function isCloudflareConfigured() {
-  return Boolean(
-    activeCfConfig.accountId &&
-    activeCfConfig.databaseId &&
-    activeCfConfig.apiToken
-  );
-}
-
-let isAutoInitializingD1 = false;
-
 /**
  * Universal Database Executor:
- * If Cloudflare D1 credentials are set, queries Cloudflare D1.
- * If Cloudflare D1 returns that tables don't exist yet, automatically creates them and retries.
- * If Cloudflare D1 is unavailable or encounters issues, seamlessly falls back to the high-performance local SQLite database.
+ * 1. Prioritizes Aiven.io Cloud MySQL when configured.
+ * 2. If tables are missing on Aiven MySQL, automatically initializes them and retries.
+ * 3. Seamlessly falls back to local SQLite if Aiven MySQL is offline or not yet configured.
  */
-async function executeDb(sql: string, params: any[] = []): Promise<{ results: any[]; isCloudflare: boolean }> {
-  if (isCloudflareConfigured()) {
-    let cfRes = await queryCloudflareD1(
-      activeCfConfig.accountId,
-      activeCfConfig.databaseId,
-      activeCfConfig.apiToken,
-      sql,
-      params
-    );
+async function executeDb(sql: string, params: any[] = []): Promise<{ results: any[]; isAiven: boolean }> {
+  if (isAivenMysqlConfigured()) {
+    let aivenRes = await queryAivenMysql(sql, params);
 
-    // If Cloudflare D1 reported missing table, automatically create tables and retry once
-    if (!cfRes.success && cfRes.error && (cfRes.error.includes('no such table') || cfRes.error.includes('SQLITE_ERROR'))) {
-      if (!isAutoInitializingD1) {
-        isAutoInitializingD1 = true;
-        try {
-          await initCloudflareD1Schema(activeCfConfig.accountId, activeCfConfig.databaseId, activeCfConfig.apiToken);
-          cfRes = await queryCloudflareD1(
-            activeCfConfig.accountId,
-            activeCfConfig.databaseId,
-            activeCfConfig.apiToken,
-            sql,
-            params
-          );
-        } catch {
-          // Fall through to local SQLite
-        } finally {
-          isAutoInitializingD1 = false;
-        }
-      }
+    // Auto-create missing tables if needed and retry once
+    if (!aivenRes.success && aivenRes.error && (aivenRes.error.includes("doesn't exist") || aivenRes.error.includes('ER_NO_SUCH_TABLE'))) {
+      try {
+        await initAivenMysqlSchema();
+        aivenRes = await queryAivenMysql(sql, params);
+      } catch {}
     }
 
-    if (!cfRes.success) {
-      // Seamlessly fall back to local SQLite
-      const db = getLocalSqlite();
-      const stmt = db.prepare(sql);
-      if (sql.trim().toUpperCase().startsWith('SELECT') || sql.trim().toUpperCase().startsWith('PRAGMA')) {
-        return { results: stmt.all(...params), isCloudflare: false };
-      } else {
-        const info = stmt.run(...params);
-        return { results: [info], isCloudflare: false };
-      }
+    if (aivenRes.success) {
+      return { results: aivenRes.results || [], isAiven: true };
     }
-    return { results: cfRes.results || [], isCloudflare: true };
+
+    console.warn('Aiven MySQL query failed, falling back to local SQLite:', aivenRes.error);
+  }
+
+  // Fallback to local SQLite
+  const db = getLocalSqlite();
+  const stmt = db.prepare(sql);
+  if (sql.trim().toUpperCase().startsWith('SELECT') || sql.trim().toUpperCase().startsWith('PRAGMA')) {
+    return { results: stmt.all(...params), isAiven: false };
   } else {
-    const db = getLocalSqlite();
-    const stmt = db.prepare(sql);
-    if (sql.trim().toUpperCase().startsWith('SELECT') || sql.trim().toUpperCase().startsWith('PRAGMA')) {
-      return { results: stmt.all(...params), isCloudflare: false };
-    } else {
-      const info = stmt.run(...params);
-      return { results: [info], isCloudflare: false };
-    }
+    const info = stmt.run(...params);
+    return { results: [info], isAiven: false };
   }
 }
 
@@ -105,24 +73,24 @@ const authenticateToken = (req: any, res: any, next: any) => {
 };
 
 // ==========================================
-// CLOUDFLARE D1 / SQLITE DIAGNOSTICS & MANAGEMENT API
+// AIVEN.IO MYSQL / SQLITE DIAGNOSTICS & MANAGEMENT API
 // ==========================================
 
 // Get current database status & config
 app.get('/api/db/status', async (req, res) => {
-  const configured = isCloudflareConfigured();
-  let d1Connected = false;
-  let d1Error = null;
+  const isConfigured = isAivenMysqlConfigured();
+  let aivenConnected = false;
+  let aivenError: string | null = null;
+  let aivenVersion: string | undefined = undefined;
 
-  if (configured) {
-    const test = await queryCloudflareD1(
-      activeCfConfig.accountId,
-      activeCfConfig.databaseId,
-      activeCfConfig.apiToken,
-      'SELECT 1 as test'
-    );
-    d1Connected = test.success;
-    if (!test.success) d1Error = test.error;
+  if (isConfigured) {
+    const test = await testAivenMysqlConnection();
+    aivenConnected = test.success;
+    if (test.success) {
+      aivenVersion = test.version;
+    } else {
+      aivenError = test.error || 'Lỗi kết nối Aiven MySQL';
+    }
   }
 
   // Count rows in current active DB
@@ -142,195 +110,168 @@ app.get('/api/db/status', async (req, res) => {
     stats = { error: err.message };
   }
 
+  const activeCfg = getActiveAivenMysqlConfig();
+  const maskedUri = activeCfg.uri
+    ? activeCfg.uri.replace(/:([^:@]+)@/, ':••••••@')
+    : undefined;
+
   res.json({
-    engine: configured && d1Connected ? 'Cloudflare D1 (SQLite)' : 'SQLite Database Engine (Local & D1-Ready)',
-    mode: configured && d1Connected ? 'cloudflare_d1' : 'local_sqlite',
-    isCloudflareConfigured: configured,
-    d1Connected,
-    d1Error,
+    engine: isConfigured && aivenConnected ? `Aiven.io Cloud MySQL (${aivenVersion || 'v8.0'})` : 'SQLite Database Engine (Local Fallback)',
+    mode: isConfigured && aivenConnected ? 'aiven_mysql' : 'local_sqlite',
+    isConfigured,
+    connected: aivenConnected,
+    error: aivenError,
+    version: aivenVersion,
     activeConfig: {
-      accountId: activeCfConfig.accountId ? `${activeCfConfig.accountId.slice(0, 6)}...` : '',
-      databaseId: activeCfConfig.databaseId ? `${activeCfConfig.databaseId.slice(0, 8)}...` : '',
-      hasToken: Boolean(activeCfConfig.apiToken)
+      uriMasked: maskedUri,
+      host: activeCfg.host,
+      port: activeCfg.port,
+      user: activeCfg.user,
+      database: activeCfg.database
     },
     stats
   });
 });
 
-// Configure or update Cloudflare credentials dynamically
+// Configure or update Aiven MySQL credentials dynamically
 app.post('/api/db/config', async (req, res) => {
-  const { accountId, databaseId, apiToken } = req.body;
-  if (!accountId || !databaseId || !apiToken) {
-    return res.status(400).json({ error: 'Vui lòng cung cấp đầy đủ Account ID, Database ID và API Token.' });
+  const { uri, host, port, user, password, database, ssl } = req.body;
+  if (!uri && (!host || !user)) {
+    return res.status(400).json({ error: 'Vui lòng cung cấp Service URI từ Aiven Console hoặc Host & User.' });
   }
 
+  const cfg = {
+    uri: uri?.trim(),
+    host: host?.trim(),
+    port: port ? Number(port) : 3306,
+    user: user?.trim(),
+    password: password || '',
+    database: database?.trim() || 'defaultdb',
+    ssl: ssl !== false
+  };
+
   // Test credentials immediately
-  const test = await queryCloudflareD1(accountId.trim(), databaseId.trim(), apiToken.trim(), 'SELECT 1 as ping');
+  const test = await testAivenMysqlConnection(cfg);
   if (!test.success) {
     return res.status(400).json({
-      error: `Không thể kết nối Cloudflare D1: ${test.error}. Vui lòng kiểm tra lại token và database ID.`
+      error: `Không thể kết nối Aiven MySQL: ${test.error}. Vui lòng kiểm tra lại Service URI hoặc mật khẩu.`
     });
   }
 
-  activeCfConfig = {
-    accountId: accountId.trim(),
-    databaseId: databaseId.trim(),
-    apiToken: apiToken.trim()
-  };
+  // Save config
+  saveAivenMysqlConfig(cfg);
 
-  // Automatically ensure tables exist on Cloudflare D1
+  // Automatically ensure tables exist on Aiven MySQL
   try {
-    await initCloudflareD1Schema(activeCfConfig.accountId, activeCfConfig.databaseId, activeCfConfig.apiToken);
+    await initAivenMysqlSchema(cfg);
   } catch (schemaErr: any) {
-    console.log('Notice initializing Cloudflare D1 schema:', schemaErr?.message);
+    console.warn('Notice initializing Aiven MySQL schema:', schemaErr?.message);
   }
 
   res.json({
     success: true,
-    message: 'Kết nối thành công tới cơ sở dữ liệu Cloudflare D1 và đồng bộ bảng dữ liệu!'
+    message: `Kết nối thành công tới Aiven MySQL (${test.version || 'Active'}) và đã khởi tạo cấu trúc bảng!`
   });
 });
 
 // Reset to local SQLite
 app.post('/api/db/reset-config', (req, res) => {
-  activeCfConfig = {
-    accountId: '',
-    databaseId: '',
-    apiToken: ''
-  };
-  res.json({ success: true, message: 'Đã chuyển về SQLite cục bộ chuẩn D1' });
+  clearAivenMysqlConfig();
+  res.json({ success: true, message: 'Đã ngắt kết nối Aiven và chuyển về SQLite an toàn' });
 });
 
 // Initialize / Create All Tables in Active Database (1-Click)
 app.post('/api/db/init-tables', async (req, res) => {
   try {
-    const statements = [
-      `CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT UNIQUE NOT NULL,
-        password TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'Quản trị',
-        is_locked INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now'))
-      )`,
-      `INSERT OR IGNORE INTO users (id, username, password, role, is_locked) VALUES 
-        ('251d0986-02e4-45c0-a89c-c832abb7778f', 'admin', 'Sonla@2026', 'Quản trị', 0),
-        ('fa818b2c-8bc0-4e4b-97e3-0599a0937402', 'admin1', 'Sonla', 'Quản trị', 0),
-        ('bb913b82-6284-4720-bf49-cb7b6d19b48f', 'operator', 'operator123', 'Điều hành', 0)`,
-      `UPDATE users SET password = 'Sonla@2026' WHERE username = 'admin'`,
-      `UPDATE users SET password = 'Sonla' WHERE username = 'admin1'`,
-      `UPDATE users SET password = 'operator123' WHERE username = 'operator'`,
-      `CREATE TABLE IF NOT EXISTS teams (
-        id TEXT PRIMARY KEY,
-        name TEXT UNIQUE NOT NULL,
-        is_locked INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now'))
-      )`,
-      `INSERT OR IGNORE INTO teams (id, name, is_locked, created_at) VALUES 
-        ('7b0f405f-acf3-4d11-b644-04ddd6bd2811', 'Team 1: Leader Cá Kiếm', 0, '2026-03-20T00:00:00Z'), 
-        ('0605a224-e5a8-49f1-a8fb-fc34016dc359', 'Team 2: Leader Minato', 0, '2026-03-20T00:01:00Z'), 
-        ('5d81c808-7438-4a3e-b814-280ee3c4c2ad', 'Team 3: Đấu giá', 0, '2026-03-20T00:02:00Z'), 
-        ('bd4bb1cd-1418-4927-a034-e7f5e17da04a', 'Team 4: Vá lốp', 0, '2026-03-20T00:03:00Z')`,
-      `CREATE TABLE IF NOT EXISTS registrations (
-        id TEXT PRIMARY KEY,
-        team TEXT NOT NULL,
-        in_game_name TEXT NOT NULL,
-        tanks TEXT NOT NULL,
-        is_winner INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now'))
-      )`,
-      `CREATE TABLE IF NOT EXISTS news (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        content TEXT NOT NULL,
-        created_at TEXT DEFAULT (datetime('now'))
-      )`,
-      `INSERT OR IGNORE INTO news (id, title, content, created_at) VALUES
-        ('52d95507-e7a3-4f92-8721-70107c643e18', 'Thông báo: Khởi động sự kiện Campaign 2026', 'Chào mừng các chiến binh tham gia chiến dịch Spring Maneuvers 2026! Thời gian diễn ra từ 23/03/2026 đến 06/04/2026. Các đội vui lòng kiểm tra danh sách thành viên và chuẩn bị phương tiện tác chiến.', '2026-03-20T08:00:00Z'),
-        ('c6df86f3-ec10-4f2c-aacf-7bc9aa1c546c', 'Quy định đăng ký & Chốt danh sách', 'Mỗi chiến binh đăng ký với tên In-Game chính xác và các xe sử dụng. Khi đội tuyển được Ban Quản Trị / Điều Hành chốt danh sách, thành viên mới sẽ không thể đăng ký thêm vào đội đó.', '2026-03-21T09:30:00Z')`,
-      `CREATE TABLE IF NOT EXISTS campaign_settings (
-        id INTEGER PRIMARY KEY,
-        campaign_name TEXT NOT NULL DEFAULT 'Campaign 2026',
-        phase_name TEXT NOT NULL DEFAULT 'Spring Maneuvers',
-        start_date TEXT NOT NULL DEFAULT '23/03/2026',
-        end_date TEXT NOT NULL DEFAULT '06/04/2026',
-        updated_at TEXT DEFAULT (datetime('now'))
-      )`,
-      `INSERT OR IGNORE INTO campaign_settings (id, campaign_name, phase_name, start_date, end_date)
-        VALUES (1, 'Campaign 2026', 'Spring Maneuvers', '23/03/2026', '06/04/2026')`
-    ];
-
-    for (const sql of statements) {
-      await executeDb(sql);
+    if (isAivenMysqlConfigured()) {
+      const mysqlRes = await initAivenMysqlSchema();
+      if (!mysqlRes.success) {
+        return res.status(500).json({ error: mysqlRes.error });
+      }
     }
+
+    // Also ensure local SQLite schema
+    const local = getLocalSqlite();
+    initSqliteSchema(local);
 
     res.json({
       success: true,
-      message: 'Khởi tạo thành công toàn bộ bảng & tài khoản mặc định trên Database SQLite!'
+      message: 'Khởi tạo thành công toàn bộ bảng & tài khoản mặc định trên Aiven MySQL & SQLite!'
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Lỗi khởi tạo bảng' });
   }
 });
 
-// Sync data between client and backend SQLite / Cloudflare D1
+// Sync data between client and backend (Aiven MySQL & SQLite)
 app.post('/api/db/sync', async (req, res) => {
   const { teams, users, news, registrations, campaignSettings } = req.body;
   try {
+    // 1. Sync to Aiven MySQL if configured
+    if (isAivenMysqlConfigured()) {
+      await syncDatasetToAivenMysql({ teams, users, news, registrations, campaignSettings });
+    }
+
+    // 2. Also keep local SQLite updated as backup
     if (Array.isArray(teams)) {
       for (const t of teams) {
-        await executeDb(
-          `INSERT INTO teams (id, name, is_locked, created_at)
-           VALUES (?, ?, ?, COALESCE(?, datetime('now')))
-           ON CONFLICT(id) DO UPDATE SET name=excluded.name, is_locked=excluded.is_locked`,
-          [t.id, t.name, t.is_locked ? 1 : 0, t.created_at || null]
-        );
+        const local = getLocalSqlite();
+        local.prepare(`
+          INSERT INTO teams (id, name, is_locked, created_at)
+          VALUES (?, ?, ?, COALESCE(?, datetime('now')))
+          ON CONFLICT(id) DO UPDATE SET name=excluded.name, is_locked=excluded.is_locked
+        `).run(t.id, t.name, t.is_locked ? 1 : 0, t.created_at || null);
       }
     }
 
     if (Array.isArray(users)) {
       for (const u of users) {
-        await executeDb(
-          `INSERT INTO users (id, username, password, role, is_locked, created_at)
-           VALUES (?, ?, ?, ?, ?, datetime('now'))
-           ON CONFLICT(id) DO UPDATE SET role=excluded.role, is_locked=excluded.is_locked, password=COALESCE(excluded.password, users.password)`,
-          [u.id, u.username, u.password || 'Sonla@2026', u.role || 'Quản trị', u.is_locked ? 1 : 0]
-        );
+        const local = getLocalSqlite();
+        local.prepare(`
+          INSERT INTO users (id, username, password, role, is_locked, created_at)
+          VALUES (?, ?, ?, ?, ?, datetime('now'))
+          ON CONFLICT(id) DO UPDATE SET role=excluded.role, is_locked=excluded.is_locked, password=COALESCE(excluded.password, users.password)
+        `).run(u.id, u.username, u.password || 'Sonla@2026', u.role || 'Quản trị', u.is_locked ? 1 : 0);
       }
     }
 
     if (Array.isArray(news)) {
       for (const n of news) {
-        await executeDb(
-          `INSERT INTO news (id, title, content, created_at)
-           VALUES (?, ?, ?, COALESCE(?, datetime('now')))
-           ON CONFLICT(id) DO UPDATE SET title=excluded.title, content=excluded.content`,
-          [n.id, n.title, n.content, n.created_at || null]
-        );
+        const local = getLocalSqlite();
+        local.prepare(`
+          INSERT INTO news (id, title, content, created_at)
+          VALUES (?, ?, ?, COALESCE(?, datetime('now')))
+          ON CONFLICT(id) DO UPDATE SET title=excluded.title, content=excluded.content
+        `).run(n.id, n.title, n.content, n.created_at || null);
       }
     }
 
     if (Array.isArray(registrations)) {
       for (const r of registrations) {
-        await executeDb(
-          `INSERT INTO registrations (id, team, in_game_name, tanks, is_winner, created_at)
-           VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
-           ON CONFLICT(id) DO UPDATE SET team=excluded.team, in_game_name=excluded.in_game_name, tanks=excluded.tanks, is_winner=excluded.is_winner`,
-          [r.id, r.team, r.in_game_name, r.tanks, r.is_winner ? 1 : 0, r.created_at || null]
-        );
+        const local = getLocalSqlite();
+        local.prepare(`
+          INSERT INTO registrations (id, team, in_game_name, tanks, is_winner, created_at)
+          VALUES (?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+          ON CONFLICT(id) DO UPDATE SET team=excluded.team, in_game_name=excluded.in_game_name, tanks=excluded.tanks, is_winner=excluded.is_winner
+        `).run(r.id, r.team, r.in_game_name, r.tanks, r.is_winner ? 1 : 0, r.created_at || null);
       }
     }
 
     if (campaignSettings) {
-      await executeDb(
-        `INSERT INTO campaign_settings (id, campaign_name, phase_name, start_date, end_date, updated_at)
-         VALUES (1, ?, ?, ?, ?, datetime('now'))
-         ON CONFLICT(id) DO UPDATE SET campaign_name=excluded.campaign_name, phase_name=excluded.phase_name, start_date=excluded.start_date, end_date=excluded.end_date`,
-        [campaignSettings.campaign_name, campaignSettings.phase_name, campaignSettings.start_date, campaignSettings.end_date]
-      );
+      const local = getLocalSqlite();
+      local.prepare(`
+        INSERT INTO campaign_settings (id, campaign_name, phase_name, start_date, end_date, updated_at)
+        VALUES (1, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(id) DO UPDATE SET campaign_name=excluded.campaign_name, phase_name=excluded.phase_name, start_date=excluded.start_date, end_date=excluded.end_date
+      `).run(campaignSettings.campaign_name, campaignSettings.phase_name, campaignSettings.start_date, campaignSettings.end_date);
     }
 
-    res.json({ success: true, message: 'Đồng bộ dữ liệu thành công lên SQLite!' });
+    res.json({
+      success: true,
+      message: isAivenMysqlConfigured()
+        ? 'Đồng bộ dữ liệu thành công sang Aiven MySQL và lưu dự phòng an toàn trên SQLite!'
+        : 'Đồng bộ dữ liệu thành công lên SQLite!'
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Lỗi đồng bộ dữ liệu' });
   }
@@ -683,9 +624,11 @@ async function startServer() {
   // Ensure local SQLite schema is initialized on boot
   getLocalSqlite();
 
-  // If Cloudflare D1 is configured, also ensure tables exist on Cloudflare D1
-  if (isCloudflareConfigured()) {
-    initCloudflareD1Schema(activeCfConfig.accountId, activeCfConfig.databaseId, activeCfConfig.apiToken).catch(() => {});
+  // If Aiven MySQL is configured, ensure tables exist on Aiven MySQL
+  if (isAivenMysqlConfigured()) {
+    initAivenMysqlSchema().catch((err) => {
+      console.warn('Notice initializing Aiven MySQL on startup:', err?.message);
+    });
   }
 
   if (process.env.NODE_ENV !== 'production') {

@@ -761,7 +761,7 @@ export async function syncAllLocalToCloudflare(): Promise<{
     return {
       success: false,
       count: { teams: 0, regs: 0, news: 0, users: 0 },
-      error: err?.message || 'Có lỗi khi đồng bộ dữ liệu sang Cloudflare D1 / SQLite'
+      error: err?.message || 'Có lỗi khi đồng bộ dữ liệu sang Aiven MySQL / SQLite'
     };
   }
 }

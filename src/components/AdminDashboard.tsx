@@ -353,7 +353,7 @@ export default function AdminDashboard() {
                   }`}
                 >
                   <Database size={18} />
-                  Cloudflare D1 &amp; SQLite
+                  Aiven MySQL &amp; SQLite
                 </button>
               )}
             </>
