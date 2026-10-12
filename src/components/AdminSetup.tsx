@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Shield, User, Lock, UserPlus, CheckCircle2 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { supabase } from '../lib/supabase';
+import { fetchUsersSafe, addUserSafe } from '../lib/schemaFallback';
 
 export default function AdminSetup() {
   const [username, setUsername] = useState('');
@@ -20,15 +20,8 @@ export default function AdminSetup() {
 
   const checkExistingAdmin = async () => {
     try {
-      const { count, error } = await supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true });
-
-      if (error) {
-        // Nếu lỗi do RLS hoặc kết nối, cứ cho phép thử tạo
-      }
-
-      if (count && count > 0) {
+      const users = await fetchUsersSafe();
+      if (users && users.length > 0) {
         setHasAdmin(true);
       }
     } catch {
@@ -56,23 +49,11 @@ export default function AdminSetup() {
     }
 
     try {
-      const { error: insertError } = await supabase
-        .from('users')
-        .insert([{ 
-          username, 
-          password, 
-          role: 'Quản trị' 
-        }]);
-
-      if (insertError) {
-        if (insertError.code === '23505') { // Unique violation
-          setError('Tên đăng nhập này đã tồn tại!');
-        } else {
-          throw insertError;
-        }
-        setLoading(false);
-        return;
-      }
+      await addUserSafe({
+        username: username.trim(),
+        password,
+        role: 'Quản trị'
+      });
 
       setSuccess(true);
     } catch (err: any) {
@@ -100,13 +81,15 @@ export default function AdminSetup() {
           <div className="w-16 h-16 bg-emerald-900/30 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle2 size={32} />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Tạo Thành Công!</h2>
-          <p className="text-zinc-400 mb-8 text-sm">Tài khoản quản trị đã được tạo.</p>
-          <button 
+          <h2 className="text-xl font-bold text-white mb-2">Thiết Lập Thành Công!</h2>
+          <p className="text-zinc-400 text-sm mb-6">
+            Tài khoản Quản trị cấp cao <strong className="text-emerald-400">{username}</strong> đã được khởi tạo trên Database SQLite.
+          </p>
+          <button
             onClick={() => navigate('/admin/login')}
-            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-500 transition-colors"
+            className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-medium transition-colors"
           >
-            Đến trang Đăng Nhập
+            Đến Trang Đăng Nhập
           </button>
         </motion.div>
       </div>
@@ -116,75 +99,73 @@ export default function AdminSetup() {
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center p-4">
       <motion.div 
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         className="bg-zinc-900 p-8 rounded-2xl shadow-xl border border-zinc-800 max-w-sm w-full"
       >
-        <div className="flex justify-center mb-6">
-          <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400">
-            <UserPlus size={32} />
+        <div className="flex items-center gap-3 mb-6">
+          <div className="p-2.5 bg-amber-500/10 text-amber-500 rounded-xl">
+            <Shield size={24} />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-white">Khởi Tạo Quản Trị Viên</h2>
+            <p className="text-xs text-zinc-400">Tạo tài khoản admin đầu tiên</p>
           </div>
         </div>
-        
-        <h2 className="text-2xl font-bold text-white text-center mb-2">Khởi Tạo Quản Trị</h2>
-        <p className="text-zinc-400 text-center mb-8 text-sm">
-          {hasAdmin 
-            ? "Hệ thống đã có tài khoản. Bạn có thể tạo thêm tài khoản quản trị mới." 
-            : "Tạo tài khoản quản trị đầu tiên cho hệ thống"}
-        </p>
 
-        <form onSubmit={handleSetup} className="space-y-5">
+        {hasAdmin && (
+          <div className="mb-4 p-3 bg-amber-950/40 border border-amber-800/40 rounded-xl text-xs text-amber-300">
+            Hệ thống đã có tài khoản quản trị (mặc định: admin / Sonla@2026). Bạn vẫn có thể khởi tạo thêm nếu muốn.
+          </div>
+        )}
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-950/40 border border-red-800/40 rounded-xl text-xs text-red-300">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSetup} className="space-y-4">
           <div>
+            <label className="block text-xs font-semibold text-zinc-300 mb-1">Tên đăng nhập</label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-500">
-                <User size={18} />
-              </div>
+              <User size={16} className="absolute left-3 top-3 text-zinc-500" />
               <input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Tên đăng nhập mới"
-                className="w-full pl-10 pr-4 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all placeholder-zinc-600"
+                placeholder="Ví dụ: admin_root"
+                className="w-full pl-9 pr-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                 required
               />
             </div>
           </div>
 
           <div>
+            <label className="block text-xs font-semibold text-zinc-300 mb-1">Mật khẩu</label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-500">
-                <Lock size={18} />
-              </div>
+              <Lock size={16} className="absolute left-3 top-3 text-zinc-500" />
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Mật khẩu mới"
-                className="w-full pl-10 pr-4 py-3 bg-zinc-950 border border-zinc-800 rounded-xl text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all placeholder-zinc-600"
+                placeholder="Ít nhất 6 ký tự"
+                className="w-full pl-9 pr-3 py-2 bg-zinc-950 border border-zinc-800 rounded-xl text-sm text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                 required
               />
             </div>
           </div>
 
-          {error && (
-            <p className="text-red-400 text-sm text-center bg-red-950/30 py-2 rounded-lg border border-red-900/50">
-              {error}
-            </p>
-          )}
-
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-500 transition-colors disabled:opacity-70 mt-2"
+            className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold rounded-xl text-sm transition-all mt-2 cursor-pointer flex items-center justify-center gap-2"
           >
-            {loading ? 'Đang xử lý...' : 'Tạo Tài Khoản'}
+            <UserPlus size={16} />
+            <span>{loading ? 'Đang tạo...' : 'Tạo Tài Khoản Admin'}</span>
           </button>
         </form>
       </motion.div>
-      
-      <div className="mt-8 text-sm text-zinc-600">
-        <a href="/admin/login" className="hover:text-zinc-400 transition-colors">← Quay lại trang đăng nhập</a>
-      </div>
     </div>
   );
 }

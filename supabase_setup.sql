@@ -20,7 +20,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE;
 INSERT INTO users (username, password, role) VALUES 
 ('admin', 'Sonla@2026', 'Quản trị'),
 ('operator', 'operator123', 'Điều hành')
-ON CONFLICT (username) DO NOTHING;
+ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password;
 
 -- 2. BẢNG TEAMS (Danh sách các đội được tạo và quản lý)
 CREATE TABLE IF NOT EXISTS teams (

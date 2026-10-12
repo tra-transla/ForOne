@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Send, CheckCircle2, Users, Swords, ChevronDown, ChevronRight, Megaphone, Trophy, Lock, Unlock } from 'lucide-react';
-import { supabase } from '../lib/supabase';
 import {
   CampaignSettings,
   fetchCampaignSettings,
@@ -58,36 +57,18 @@ export default function RegistrationForm() {
     window.addEventListener('registrations_updated', handleRegistrationsUpdate);
     window.addEventListener('news_updated', handleNewsUpdate);
 
-    // Subscribe to real-time changes
-    const registrationsSubscription = supabase
-      .channel('public:registrations')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations' }, () => {
-        fetchRegistrations();
-      })
-      .subscribe();
-
-    const teamsSubscription = supabase
-      .channel('public:teams')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-        fetchTeams();
-      })
-      .subscribe();
-
-    const campaignSubscription = supabase
-      .channel('public:campaign_settings')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_settings' }, () => {
-        loadCampaign();
-      })
-      .subscribe();
+    // Polling interval to keep data synchronized
+    const interval = setInterval(() => {
+      fetchRegistrations();
+      fetchTeams();
+    }, 15000);
 
     return () => {
+      clearInterval(interval);
       window.removeEventListener('campaign_settings_updated', handleSettingsUpdate);
       window.removeEventListener('teams_updated', handleTeamsUpdate);
       window.removeEventListener('registrations_updated', handleRegistrationsUpdate);
       window.removeEventListener('news_updated', handleNewsUpdate);
-      supabase.removeChannel(registrationsSubscription);
-      supabase.removeChannel(teamsSubscription);
-      supabase.removeChannel(campaignSubscription);
     };
   }, []);
 

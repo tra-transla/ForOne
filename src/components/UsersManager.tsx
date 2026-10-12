@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
 import { Trash2, Plus, ShieldAlert, UserPlus, Edit2, Save, X, Lock, Unlock } from 'lucide-react';
 import {
   UserItem,

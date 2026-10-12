@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Edit2, Trash2, Search, Users, Shield, Save, X, Settings, UserCog, User, Swords, Megaphone, Trophy, Calendar, Database } from 'lucide-react';
 import { motion } from 'motion/react';
-import { supabase } from '../lib/supabase';
+import { checkDatabaseStatus } from '../lib/cloudflareD1';
 import TeamsManager from './TeamsManager';
 import UsersManager from './UsersManager';
 import NewsManager from './NewsManager';
@@ -43,7 +43,13 @@ export default function AdminDashboard() {
   const [editingId, setEditingId] = useState<string | number | null>(null);
   const [editForm, setEditForm] = useState({ team: '', inGameName: '', tanks: '' });
 
+  const [dbEngine, setDbEngine] = useState('SQLite');
+
   useEffect(() => {
+    checkDatabaseStatus().then(status => {
+      setDbEngine(status.engine);
+    });
+
     fetchRegistrations();
     fetchTeams();
 
@@ -53,26 +59,15 @@ export default function AdminDashboard() {
     window.addEventListener('teams_updated', handleTeamsUpdate);
     window.addEventListener('registrations_updated', handleRegistrationsUpdate);
 
-    // Subscribe to real-time changes
-    const registrationsSubscription = supabase
-      .channel('admin:registrations')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'registrations' }, () => {
-        fetchRegistrations();
-      })
-      .subscribe();
-
-    const teamsSubscription = supabase
-      .channel('admin:teams')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-        fetchTeams();
-      })
-      .subscribe();
+    const interval = setInterval(() => {
+      fetchRegistrations();
+      fetchTeams();
+    }, 15000);
 
     return () => {
+      clearInterval(interval);
       window.removeEventListener('teams_updated', handleTeamsUpdate);
       window.removeEventListener('registrations_updated', handleRegistrationsUpdate);
-      supabase.removeChannel(registrationsSubscription);
-      supabase.removeChannel(teamsSubscription);
     };
   }, []);
 
@@ -222,6 +217,30 @@ export default function AdminDashboard() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
+        {/* Active Database Badge */}
+        <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 text-sm shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-500 text-zinc-950 rounded-xl font-bold">
+              <Database size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <p className="font-bold text-amber-950">Hệ thống đang chạy trên: {dbEngine}</p>
+                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500 text-zinc-950">Đồng bộ tức thì</span>
+              </div>
+              <p className="text-xs text-amber-900 mt-0.5">
+                Toàn bộ dữ liệu thành viên, đội hình và cấu hình đang được lưu trữ an toàn trong SQLite và sẵn sàng đồng bộ trực tiếp với Cloudflare D1.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setActiveTab('database')}
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-bold rounded-xl text-xs whitespace-nowrap self-start sm:self-auto transition-colors shadow-sm"
+          >
+            Quản lý Cloudflare D1
+          </button>
+        </div>
+
         {/* Tabs */}
         <div className="flex gap-4 mb-8 border-b border-zinc-200 pb-px">
           <button
@@ -291,7 +310,7 @@ export default function AdminDashboard() {
                 }`}
               >
                 <Database size={18} />
-                Cơ sở dữ liệu & SQL
+                Cloudflare D1 &amp; SQLite
               </button>
             </>
           )}

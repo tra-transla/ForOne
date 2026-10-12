@@ -1,5 +1,3 @@
-import { supabase } from './supabase';
-
 export interface CampaignSettings {
   campaign_name: string;
   phase_name: string;
@@ -35,30 +33,25 @@ export const getStoredCampaignSettings = (): CampaignSettings => {
 };
 
 export const fetchCampaignSettings = async (): Promise<CampaignSettings> => {
-  // Try fetching from Supabase first
   try {
-    const { data, error } = await supabase
-      .from('campaign_settings')
-      .select('campaign_name, phase_name, start_date, end_date')
-      .order('id', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (!error && data) {
-      const settings: CampaignSettings = {
-        campaign_name: data.campaign_name || DEFAULT_CAMPAIGN_SETTINGS.campaign_name,
-        phase_name: data.phase_name || DEFAULT_CAMPAIGN_SETTINGS.phase_name,
-        start_date: data.start_date || DEFAULT_CAMPAIGN_SETTINGS.start_date,
-        end_date: data.end_date || DEFAULT_CAMPAIGN_SETTINGS.end_date,
-      };
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(settings));
-      return settings;
+    const res = await fetch('/api/campaign-settings');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.campaign_name) {
+        const settings: CampaignSettings = {
+          campaign_name: data.campaign_name,
+          phase_name: data.phase_name,
+          start_date: data.start_date,
+          end_date: data.end_date,
+        };
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(settings));
+        return settings;
+      }
     }
   } catch (err) {
-    console.warn('Could not fetch campaign settings from Supabase, using local fallback:', err);
+    console.warn('Could not fetch campaign settings from API, using fallback:', err);
   }
 
-  // Fallback to localStorage or default
   return getStoredCampaignSettings();
 };
 
@@ -75,48 +68,19 @@ export const saveCampaignSettings = async (
     console.warn('Failed to save campaign settings to localStorage', err);
   }
 
-  // Try updating Supabase
+  // Update backend SQLite / Cloudflare D1
   try {
-    // Check if a row exists
-    const { data: existingRows } = await supabase
-      .from('campaign_settings')
-      .select('id')
-      .limit(1);
-
-    if (existingRows && existingRows.length > 0) {
-      const targetId = existingRows[0].id;
-      const { error } = await supabase
-        .from('campaign_settings')
-        .update({
-          campaign_name: settings.campaign_name,
-          phase_name: settings.phase_name,
-          start_date: settings.start_date,
-          end_date: settings.end_date,
-        })
-        .eq('id', targetId);
-
-      if (error) {
-        console.warn('Supabase campaign_settings update warning:', error.message);
-      }
-    } else {
-      const { error } = await supabase
-        .from('campaign_settings')
-        .insert([
-          {
-            campaign_name: settings.campaign_name,
-            phase_name: settings.phase_name,
-            start_date: settings.start_date,
-            end_date: settings.end_date,
-          },
-        ]);
-
-      if (error) {
-        console.warn('Supabase campaign_settings insert warning:', error.message);
-      }
+    const res = await fetch('/api/campaign-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings)
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      return { success: false, error: data.error };
     }
-  } catch (err) {
-    console.warn('Supabase save error (saved locally):', err);
+    return { success: true };
+  } catch (err: any) {
+    return { success: true }; // LocalStorage saved
   }
-
-  return { success: true };
 };

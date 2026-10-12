@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
 import { Trash2, Plus, Users, Edit2, Save, X, Swords, Lock, Unlock, ShieldAlert } from 'lucide-react';
 import {
   TeamItem,
@@ -31,18 +30,9 @@ export default function TeamsManager() {
     window.addEventListener('teams_updated', handleTeamsUpdate);
     window.addEventListener('registrations_updated', handleRegsUpdate);
 
-    // Subscribe to real-time changes
-    const teamsSubscription = supabase
-      .channel('manager:teams')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => {
-        loadData();
-      })
-      .subscribe();
-
     return () => {
       window.removeEventListener('teams_updated', handleTeamsUpdate);
       window.removeEventListener('registrations_updated', handleRegsUpdate);
-      supabase.removeChannel(teamsSubscription);
     };
   }, []);
 
