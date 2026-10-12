@@ -83,10 +83,9 @@ CREATE TABLE IF NOT EXISTS campaign_settings (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Khởi tạo dữ liệu người dùng ban đầu
-INSERT IGNORE INTO users (id, username, password, role, is_locked) VALUES 
-('251d0986-02e4-45c0-a89c-c832abb7778f', 'admin', 'Sonla@2026', 'Quản trị', 0),
-('bb913b82-6284-4720-bf49-cb7b6d19b48f', 'operator', 'operator123', 'Điều hành', 0);
+-- Khởi tạo tài khoản quản trị bảo mật (Khởi tạo tự động bởi hệ thống hoặc tùy biến):
+-- INSERT IGNORE INTO users (id, username, password, role, is_locked) VALUES 
+-- (UUID(), 'admin', 'MẬT_KHẨU_QUẢN_TRỊ_CỦA_BẠN', 'Quản trị', 0);
 
 -- Khởi tạo các đội tham chiến
 INSERT IGNORE INTO teams (id, name, is_locked, created_at) VALUES 
@@ -222,10 +221,15 @@ export default function DatabaseManager() {
     }
   };
 
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+
   const handleResetToSqlite = async () => {
-    if (!window.confirm('Bạn có chắc chắn muốn ngắt kết nối Aiven MySQL và quay về cơ sở dữ liệu SQLite cục bộ?')) {
+    if (!confirmDisconnect) {
+      setConfirmDisconnect(true);
+      setTimeout(() => setConfirmDisconnect(false), 4000);
       return;
     }
+    setConfirmDisconnect(false);
     await resetDatabaseConfig();
     setUri('');
     setPassword('');
@@ -404,9 +408,13 @@ export default function DatabaseManager() {
             {diagResult?.connected && (
               <button
                 onClick={handleResetToSqlite}
-                className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                  confirmDisconnect
+                    ? 'bg-red-600 text-white hover:bg-red-700 animate-pulse'
+                    : 'bg-red-50 hover:bg-red-100 text-red-600'
+                }`}
               >
-                Ngắt kết nối
+                {confirmDisconnect ? 'Xác nhận ngắt kết nối?' : 'Ngắt kết nối'}
               </button>
             )}
           </div>

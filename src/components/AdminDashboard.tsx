@@ -112,7 +112,8 @@ export default function AdminDashboard() {
 
   const handleSaveEdit = async (id: string | number) => {
     if (!editForm.team.trim() || !editForm.inGameName.trim() || !editForm.tanks.trim()) {
-      alert('Vui lòng điền đầy đủ thông tin');
+      setFeedbackMsg({ type: 'error', text: 'Vui lòng điền đầy đủ thông tin' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
       return;
     }
 
@@ -127,8 +128,11 @@ export default function AdminDashboard() {
         reg.id === id ? { ...reg, team: editForm.team.trim(), in_game_name: editForm.inGameName.trim(), tanks: editForm.tanks.trim() } : reg
       ));
       setEditingId(null);
+      setFeedbackMsg({ type: 'success', text: 'Cập nhật thành công thông tin đăng ký!' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      alert('Lỗi khi cập nhật: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({ type: 'error', text: 'Lỗi khi cập nhật: ' + (error?.message || 'Vui lòng thử lại') });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     }
   };
 

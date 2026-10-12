@@ -66,11 +66,9 @@ export default function CampaignSettingsManager() {
   };
 
   const handleReset = () => {
-    if (window.confirm('Khôi phục thời gian về mặc định (23/03/2026 đến 06/04/2026)?')) {
-      setSettings(DEFAULT_CAMPAIGN_SETTINGS);
-      setStatusMessage({ type: 'success', text: 'Đã hoàn tác về giá trị mặc định. Bấm "Lưu thay đổi" để áp dụng.' });
-      setTimeout(() => setStatusMessage(null), 4000);
-    }
+    setSettings(DEFAULT_CAMPAIGN_SETTINGS);
+    setStatusMessage({ type: 'success', text: 'Đã hoàn tác về giá trị mặc định. Bấm "Lưu thay đổi" để áp dụng.' });
+    setTimeout(() => setStatusMessage(null), 4000);
   };
 
   if (loading) {

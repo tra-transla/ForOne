@@ -59,8 +59,11 @@ export default function UsersManager() {
       setNewUsername('');
       setNewPassword('');
       setNewRole('Điều hành');
+      setFeedbackMsg({ type: 'success', text: `Đã tạo tài khoản "${newUsername.trim()}" thành công!` });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      alert('Lỗi khi thêm người dùng: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({ type: 'error', text: 'Lỗi khi thêm người dùng: ' + (error?.message || 'Vui lòng thử lại') });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     }
   };
 
@@ -96,7 +99,8 @@ export default function UsersManager() {
 
   const handleSaveEdit = async (id: string | number) => {
     if (!editForm.username.trim()) {
-      alert('Tên đăng nhập không được để trống');
+      setFeedbackMsg({ type: 'error', text: 'Tên đăng nhập không được để trống' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
       return;
     }
 
@@ -114,8 +118,11 @@ export default function UsersManager() {
         u.id === id ? { ...u, role: editForm.role } : u
       ));
       setEditingId(null);
+      setFeedbackMsg({ type: 'success', text: 'Đã cập nhật thông tin người dùng!' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      alert('Lỗi khi cập nhật người dùng: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({ type: 'error', text: 'Lỗi khi cập nhật người dùng: ' + (error?.message || 'Vui lòng thử lại') });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     }
   };
 
@@ -125,8 +132,11 @@ export default function UsersManager() {
       setUsers(users.map(u => 
         u.id === id ? { ...u, is_locked: newStatus } : u
       ));
+      setFeedbackMsg({ type: 'success', text: newStatus ? 'Đã khóa tài khoản' : 'Đã mở khóa tài khoản' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      alert('Lỗi khi cập nhật trạng thái khóa: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({ type: 'error', text: 'Lỗi khi cập nhật trạng thái khóa: ' + (error?.message || 'Vui lòng thử lại') });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     }
   };
 

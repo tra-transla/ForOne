@@ -69,7 +69,8 @@ export default function TeamsManager() {
     if (!trimmed) return;
 
     if (teams.some(t => t.name.toLowerCase() === trimmed.toLowerCase())) {
-      alert('Tên team này đã tồn tại!');
+      setFeedbackMsg({ type: 'error', text: 'Tên team này đã tồn tại!' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
       return;
     }
 
@@ -78,8 +79,11 @@ export default function TeamsManager() {
       await addTeamSafe(trimmed);
       setNewTeamName('');
       await loadData();
+      setFeedbackMsg({ type: 'success', text: `Đã thêm team "${trimmed}" thành công!` });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      alert('Lỗi khi thêm team: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({ type: 'error', text: 'Lỗi khi thêm team: ' + (error?.message || 'Vui lòng thử lại') });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } finally {
       setIsSubmitting(false);
     }
@@ -100,7 +104,8 @@ export default function TeamsManager() {
     if (!trimmed) return;
 
     if (trimmed !== team.name && teams.some(t => t.name.toLowerCase() === trimmed.toLowerCase())) {
-      alert('Tên team mới đã bị trùng với một team khác!');
+      setFeedbackMsg({ type: 'error', text: 'Tên team mới đã bị trùng với một team khác!' });
+      setTimeout(() => setFeedbackMsg(null), 4000);
       return;
     }
 
@@ -109,8 +114,11 @@ export default function TeamsManager() {
       setEditingTeamKey(null);
       setEditTeamName('');
       await loadData();
+      setFeedbackMsg({ type: 'success', text: `Đã cập nhật tên team thành "${trimmed}"!` });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      alert('Lỗi khi cập nhật tên team: ' + (error?.message || 'Vui lòng thử lại'));
+      setFeedbackMsg({ type: 'error', text: 'Lỗi khi cập nhật tên team: ' + (error?.message || 'Vui lòng thử lại') });
+      setTimeout(() => setFeedbackMsg(null), 4000);
     }
   };
 
