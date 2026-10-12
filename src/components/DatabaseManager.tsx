@@ -66,7 +66,7 @@ INSERT INTO users (username, password, role) VALUES
 ('operator', 'operator123', 'Điều hành')
 ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password;
 
--- 2. BẢNG TEAMS (Danh sách đội được tạo và quản lý)
+-- 2. BẢNG TEAMS (Danh sách các đội được tạo và quản lý)
 CREATE TABLE IF NOT EXISTS teams (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name TEXT UNIQUE NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS teams (
 -- Bổ sung cột is_locked nếu bảng đã tạo trước đó
 ALTER TABLE teams ADD COLUMN IF NOT EXISTS is_locked BOOLEAN DEFAULT FALSE;
 
--- Thêm team mặc định ban đầu
+-- Thêm các team mặc định ban đầu
 INSERT INTO teams (name) VALUES 
 ('Team 1: Leader Cá Kiếm'), 
 ('Team 2: Leader Minato'), 
@@ -108,8 +108,8 @@ CREATE TABLE IF NOT EXISTS news (
 
 -- Thêm tin tức khởi động
 INSERT INTO news (title, content) VALUES
-('Thông báo: Khởi động sự kiện Campaign 2026', 'Chào mừng chiến binh tham gia chiến dịch Spring Maneuvers 2026! Thời gian diễn ra từ 23/03/2026 đến 06/04/2026. Đội vui lòng kiểm tra danh sách thành viên và chuẩn bị phương tiện tác chiến.'),
-('Quy định đăng ký & Chốt danh sách', 'Mỗi chiến binh đăng ký với tên In-Game chính xác và xe sử dụng. Khi đội tuyển được Ban Quản Trị / Điều Hành chốt danh sách, thành viên mới sẽ không thể đăng ký thêm vào đội đó.')
+('Thông báo: Khởi động sự kiện Campaign 2026', 'Chào mừng các chiến binh tham gia chiến dịch Spring Maneuvers 2026! Thời gian diễn ra từ 23/03/2026 đến 06/04/2026. Các đội vui lòng kiểm tra danh sách thành viên và chuẩn bị phương tiện tác chiến.'),
+('Quy định đăng ký & Chốt danh sách', 'Mỗi chiến binh đăng ký với tên In-Game chính xác và các xe sử dụng. Khi đội tuyển được Ban Quản Trị / Điều Hành chốt danh sách, thành viên mới sẽ không thể đăng ký thêm vào đội đó.')
 ON CONFLICT DO NOTHING;
 
 -- 5. BẢNG CAMPAIGN_SETTINGS (Cấu hình thời gian & thông tin chiến dịch)

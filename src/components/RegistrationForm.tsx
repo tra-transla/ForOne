@@ -322,12 +322,12 @@ export default function RegistrationForm() {
 
                 <div>
                   <label className="block text-sm font-medium text-zinc-700 mb-2">
-                    Tanks (Xe tăng sử dụng) <span className="text-red-500">*</span>
+                    Tanks (Các xe tăng sử dụng) <span className="text-red-500">*</span>
                   </label>
                   <textarea
                     value={formData.tanks}
                     onChange={(e) => setFormData({ ...formData, tanks: e.target.value })}
-                    placeholder="Liệt kê xe tăng bạn sẽ sử dụng..."
+                    placeholder="Liệt kê các xe tăng bạn sẽ sử dụng..."
                     rows={3}
                     className="w-full px-4 py-3 rounded-xl border border-zinc-200 focus:ring-2 focus:ring-zinc-900 focus:border-zinc-900 outline-none transition-all resize-none text-sm"
                     required
@@ -436,7 +436,7 @@ export default function RegistrationForm() {
                       listTab === 'all' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
                     }`}
                   >
-                    Danh sách Team ({teams.length})
+                    Danh sách các Team ({teams.length})
                   </button>
                 </div>
               </div>
