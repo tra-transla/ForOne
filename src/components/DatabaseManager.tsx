@@ -390,6 +390,25 @@ export default function DatabaseManager() {
                 <p className="text-sm opacity-90 leading-relaxed max-w-3xl">
                   {diagResult.message}
                 </p>
+                {diagResult.code === 'INVALID_KEY' && (
+                  <div className="mt-3 p-3 bg-red-100/80 border border-red-300 rounded-xl text-xs text-red-900 space-y-1.5">
+                    <div className="font-bold flex items-center gap-1.5">
+                      <ShieldAlert size={15} className="text-red-600" />
+                      Hướng dẫn sửa lỗi INVALID_KEY trên Supabase Dashboard:
+                    </div>
+                    <ol className="list-decimal list-inside space-y-1 pl-1 text-red-800">
+                      <li>Truy cập Supabase Dashboard → Mở dự án của bạn → Vào <b>Project Settings</b> (Hình bánh răng góc dưới bên trái).</li>
+                      <li>Chọn mục <b>API</b> (dưới nhóm Configuration).</li>
+                      <li>
+                        Sao chép chính xác <b>Project URL</b> (ví dụ: <code>https://abcdefghijkl.supabase.co</code>) và dán vào ô URL bên dưới.
+                      </li>
+                      <li>
+                        Tại mục <b>Project API keys</b>, chọn dòng <code>anon</code> <code>public</code> (Chuỗi khóa bắt đầu bằng <code>eyJhbGci...</code>). <b>Không</b> dùng key <i>service_role</i> hoặc mật khẩu database.
+                      </li>
+                      <li>Bấm nút <b>"Lưu cấu hình Supabase"</b> bên dưới để hệ thống cập nhật.</li>
+                    </ol>
+                  </div>
+                )}
                 <div className="text-xs opacity-75 font-mono pt-1">
                   Target: {diagResult.url}
                 </div>
