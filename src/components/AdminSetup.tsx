@@ -83,7 +83,7 @@ export default function AdminSetup() {
           </div>
           <h2 className="text-xl font-bold text-white mb-2">Thiết Lập Thành Công!</h2>
           <p className="text-zinc-400 text-sm mb-6">
-            Tài khoản Quản trị cấp cao <strong className="text-emerald-400">{username}</strong> đã được khởi tạo trên Database SQLite.
+            Tài khoản Quản trị cấp cao <strong className="text-emerald-400">{username}</strong> đã được khởi tạo thành công.
           </p>
           <button
             onClick={() => navigate('/admin/login')}
@@ -115,7 +115,7 @@ export default function AdminSetup() {
 
         {hasAdmin && (
           <div className="mb-4 p-3 bg-amber-950/40 border border-amber-800/40 rounded-xl text-xs text-amber-300">
-            Hệ thống đã có tài khoản quản trị (mặc định: admin / Sonla@2026). Bạn vẫn có thể khởi tạo thêm nếu muốn.
+            Hệ thống đã có tài khoản quản trị hoạt động. Bạn có thể đăng nhập hoặc khởi tạo thêm tài khoản quản trị mới bên dưới.
           </div>
         )}
 

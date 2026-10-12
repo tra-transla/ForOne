@@ -5,5 +5,5 @@ compatibility_date = "2024-01-01"
 # Cấu hình D1 SQLite Database Binding
 [[d1_databases]]
 binding = "DB"
-database_name = "campaign-db"
-database_id = "e029db72-d5cb-4217-bf3d-24957e841203"
+database_name = "for1"
+database_id = "e029db72-1337-4b3f-8186-cba015d86e2f"

@@ -3,7 +3,6 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Edit2, Trash2, Search, Users, Shield, Save, X, Settings, UserCog, User, Swords, Megaphone, Trophy, Calendar, Database, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
-import { checkDatabaseStatus } from '../lib/cloudflareD1';
 import TeamsManager from './TeamsManager';
 import UsersManager from './UsersManager';
 import NewsManager from './NewsManager';
@@ -47,13 +46,7 @@ export default function AdminDashboard() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const [dbEngine, setDbEngine] = useState('SQLite');
-
   useEffect(() => {
-    checkDatabaseStatus().then(status => {
-      setDbEngine(status.engine);
-    });
-
     fetchRegistrations();
     fetchTeams();
 
@@ -151,16 +144,26 @@ export default function AdminDashboard() {
     }
   };
 
-  const canManage = Boolean(
-    !user?.role ||
-    user.role === 'Quản trị' ||
-    user.role === 'Admin' ||
-    user.role === 'admin' ||
-    user.role === 'Điều hành' ||
-    user.role.toLowerCase().includes('quản') ||
-    user.role.toLowerCase().includes('admin') ||
-    user.role.toLowerCase().includes('điều')
+  const isAdmin = Boolean(
+    user?.role === 'Quản trị' ||
+    user?.role === 'Admin' ||
+    user?.role === 'admin' ||
+    (user?.role && user.role.toLowerCase().includes('quản')) ||
+    (user?.role && user.role.toLowerCase().includes('admin'))
   );
+
+  const canManage = Boolean(
+    isAdmin ||
+    !user?.role ||
+    user.role === 'Điều hành' ||
+    (user?.role && user.role.toLowerCase().includes('điều'))
+  );
+
+  useEffect(() => {
+    if (activeTab === 'database' && !isAdmin) {
+      setActiveTab('registrations');
+    }
+  }, [activeTab, isAdmin]);
 
   const handleDeleteClick = (reg: Registration) => {
     if (!canManage) {
@@ -252,29 +255,7 @@ export default function AdminDashboard() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Active Database Badge */}
-        <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-amber-950 text-sm shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-500 text-zinc-950 rounded-xl font-bold">
-              <Database size={20} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <p className="font-bold text-amber-950">Hệ thống đang chạy trên: {dbEngine}</p>
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500 text-zinc-950">Đồng bộ tức thì</span>
-              </div>
-              <p className="text-xs text-amber-900 mt-0.5">
-                Toàn bộ dữ liệu thành viên, đội hình và cấu hình đang được lưu trữ an toàn trong SQLite và sẵn sàng đồng bộ trực tiếp với Cloudflare D1.
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setActiveTab('database')}
-            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-zinc-950 font-bold rounded-xl text-xs whitespace-nowrap self-start sm:self-auto transition-colors shadow-sm"
-          >
-            Quản lý Cloudflare D1
-          </button>
-        </div>
+
 
         {/* Feedback Notification Alert */}
         {feedbackMsg && (
@@ -327,20 +308,22 @@ export default function AdminDashboard() {
                 <Settings size={18} />
                 Quản lý Team
               </button>
-              <button
-                onClick={() => setActiveTab('users')}
-                className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
-                  activeTab === 'users' 
-                    ? 'border-indigo-600 text-indigo-600' 
-                    : 'border-transparent text-zinc-500 hover:text-zinc-700 hover:border-zinc-300'
-                }`}
-              >
-                <UserCog size={18} />
-                Quản lý Người dùng
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab('users')}
+                  className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+                    activeTab === 'users' 
+                      ? 'border-indigo-600 text-indigo-600' 
+                      : 'border-transparent text-zinc-500 hover:text-zinc-700 hover:border-zinc-300'
+                  }`}
+                >
+                  <UserCog size={18} />
+                  Quản lý Người dùng
+                </button>
+              )}
               <button
                 onClick={() => setActiveTab('news')}
-                className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
                   activeTab === 'news' 
                     ? 'border-indigo-600 text-indigo-600' 
                     : 'border-transparent text-zinc-500 hover:text-zinc-700 hover:border-zinc-300'
@@ -351,7 +334,7 @@ export default function AdminDashboard() {
               </button>
               <button
                 onClick={() => setActiveTab('campaign')}
-                className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
                   activeTab === 'campaign' 
                     ? 'border-indigo-600 text-indigo-600' 
                     : 'border-transparent text-zinc-500 hover:text-zinc-700 hover:border-zinc-300'
@@ -360,26 +343,28 @@ export default function AdminDashboard() {
                 <Calendar size={18} />
                 Thời gian sự kiện
               </button>
-              <button
-                onClick={() => setActiveTab('database')}
-                className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
-                  activeTab === 'database' 
-                    ? 'border-indigo-600 text-indigo-600' 
-                    : 'border-transparent text-zinc-500 hover:text-zinc-700 hover:border-zinc-300'
-                }`}
-              >
-                <Database size={18} />
-                Cloudflare D1 &amp; SQLite
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => setActiveTab('database')}
+                  className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+                    activeTab === 'database' 
+                      ? 'border-indigo-600 text-indigo-600' 
+                      : 'border-transparent text-zinc-500 hover:text-zinc-700 hover:border-zinc-300'
+                  }`}
+                >
+                  <Database size={18} />
+                  Cloudflare D1 &amp; SQLite
+                </button>
+              )}
             </>
           )}
         </div>
 
         {activeTab === 'teams' && canManage && <TeamsManager />}
-        {activeTab === 'users' && canManage && <UsersManager />}
+        {activeTab === 'users' && isAdmin && <UsersManager />}
         {activeTab === 'news' && canManage && <NewsManager />}
         {activeTab === 'campaign' && canManage && <CampaignSettingsManager />}
-        {activeTab === 'database' && canManage && <DatabaseManager />}
+        {activeTab === 'database' && isAdmin && <DatabaseManager />}
 
         {activeTab === 'registrations' && (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>

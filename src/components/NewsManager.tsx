@@ -135,11 +135,7 @@ export default function NewsManager() {
       </div>
 
       <div className="p-6">
-        {!isTableSupported && (
-          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg text-xs md:text-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
-            <span>💡 <strong>Chế độ linh hoạt:</strong> Tin tức đang được lưu trữ an toàn trong SQLite và hiển thị bình thường trên trang chủ. Bạn có thể nhấn &quot;1-Click Khởi tạo bảng&quot; trong tab Cloudflare D1 để đồng bộ lên Cloudflare.</span>
-          </div>
-        )}
+
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 text-red-600 rounded-md text-sm">

@@ -15,8 +15,10 @@ import {
   Sparkles,
   Cloud,
   FileCode,
-  HardDrive
+  HardDrive,
+  ShieldAlert
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import {
   checkDatabaseStatus,
   configureCloudflareD1,
@@ -45,14 +47,10 @@ CREATE TABLE IF NOT EXISTS users (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+-- Khởi tạo người dùng quản trị ban đầu
 INSERT OR IGNORE INTO users (id, username, password, role, is_locked) VALUES 
 ('251d0986-02e4-45c0-a89c-c832abb7778f', 'admin', 'Sonla@2026', 'Quản trị', 0),
-('fa818b2c-8bc0-4e4b-97e3-0599a0937402', 'admin1', 'Sonla', 'Quản trị', 0),
 ('bb913b82-6284-4720-bf49-cb7b6d19b48f', 'operator', 'operator123', 'Điều hành', 0);
-
-UPDATE users SET password = 'Sonla@2026' WHERE username = 'admin';
-UPDATE users SET password = 'Sonla' WHERE username = 'admin1';
-UPDATE users SET password = 'operator123' WHERE username = 'operator';
 
 -- 2. BẢNG TEAMS
 CREATE TABLE IF NOT EXISTS teams (
@@ -105,10 +103,19 @@ VALUES (1, 'Campaign 2026', 'Spring Maneuvers', '23/03/2026', '06/04/2026');
 `;
 
 export default function DatabaseManager() {
+  const { user } = useAuth();
   const [copied, setCopied] = useState(false);
   const [copiedWorker, setCopiedWorker] = useState(false);
   const [testing, setTesting] = useState(false);
   const [diagResult, setDiagResult] = useState<CloudflareDiagnosticResult | null>(null);
+
+  const isAdmin = Boolean(
+    user?.role === 'Quản trị' ||
+    user?.role === 'Admin' ||
+    user?.role === 'admin' ||
+    (user?.role && user.role.toLowerCase().includes('quản')) ||
+    (user?.role && user.role.toLowerCase().includes('admin'))
+  );
 
   // Cloudflare D1 Credentials
   const [accountId, setAccountId] = useState('');
@@ -125,14 +132,27 @@ export default function DatabaseManager() {
   const [syncResult, setSyncResult] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isAdmin) return;
     const stored = getStoredCloudflareConfig();
-    setAccountId(stored.accountId);
-    setDatabaseId(stored.databaseId);
+    setAccountId(stored.accountId || '');
+    setDatabaseId(stored.databaseId || '');
     setApiToken(stored.apiToken);
     setWorkerUrl(getStoredWorkerUrl());
 
     loadStatus();
-  }, []);
+  }, [isAdmin]);
+
+  if (!isAdmin) {
+    return (
+      <div className="bg-white p-8 rounded-2xl border border-zinc-200 text-center my-6">
+        <ShieldAlert className="mx-auto text-amber-500 mb-3" size={40} />
+        <h3 className="text-lg font-bold text-zinc-900">Không có quyền truy cập</h3>
+        <p className="text-sm text-zinc-500 mt-1">
+          Mục cấu hình Cloudflare D1 & SQLite chỉ dành riêng cho tài khoản Quản trị viên.
+        </p>
+      </div>
+    );
+  }
 
   const loadStatus = async () => {
     setTesting(true);
@@ -327,7 +347,7 @@ export default function DatabaseManager() {
             <div className="bg-zinc-900/80 p-3.5 rounded-xl border border-zinc-800">
               <div className="text-zinc-400 text-[11px] mb-1 font-medium">Tài khoản Quản trị:</div>
               <div className="font-semibold text-emerald-300">
-                {diagResult.stats?.users ? `${diagResult.stats.users} tài khoản (admin / admin1)` : 'Đã nạp sẵn'}
+                {diagResult.stats?.users ? `${diagResult.stats.users} tài khoản` : 'Đã bảo vệ'}
               </div>
             </div>
           </div>

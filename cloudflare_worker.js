@@ -6,7 +6,7 @@
  * 1. Vào https://dash.cloudflare.com -> Workers & Pages -> Chọn Worker 'for1' (hoặc Create Application -> Create Worker)
  * 2. Vào Settings -> Variables -> D1 Database Bindings -> Add binding:
  *    - Variable name: DB
- *    - D1 database: Chọn database D1 SQLite của bạn (ví dụ: e029db72...)
+ *    - D1 database: Chọn database 'for1' (ID: e029db72-1337-4b3f-8186-cba015d86e2f)
  * 3. Bấm "Edit code" (hoặc Quick Edit), dán toàn bộ mã nguồn file này vào -> Bấm "Save and deploy"
  * 4. Truy cập https://for1.sonlahome.workers.dev để thấy kết quả và các API hoạt động ngay lập tức!
  */
