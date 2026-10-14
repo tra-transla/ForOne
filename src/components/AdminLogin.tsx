@@ -11,8 +11,38 @@ export default function AdminLogin() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const { login } = useAuth();
+  const { user, login } = useAuth();
   const navigate = useNavigate();
+
+  if (user) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+        <div className="sm:mx-auto sm:w-full sm:max-w-md text-center px-4">
+          <div className="w-16 h-16 bg-gradient-to-tr from-amber-500 to-amber-600 rounded-2xl flex items-center justify-center shadow-lg shadow-amber-500/20 text-zinc-950 mx-auto mb-4">
+            <Shield size={32} />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Bạn đã đăng nhập</h2>
+          <p className="text-zinc-400 text-sm mb-6">
+            Tài khoản: <strong className="text-amber-400">{user.username}</strong> ({user.role})
+          </p>
+          <div className="space-y-3">
+            <button
+              onClick={() => navigate('/admin/dashboard')}
+              className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm transition-all shadow-md"
+            >
+              Vào Bảng Điều Khiển
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="w-full py-3 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-sm transition-all border border-zinc-700"
+            >
+              Xem Trang Đăng Ký (Trang Đầu)
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

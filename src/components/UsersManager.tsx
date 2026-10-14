@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Trash2, Plus, ShieldAlert, UserPlus, Edit2, Save, X, Lock, Unlock, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import {
   UserItem,
   fetchUsersSafe,
@@ -17,6 +18,15 @@ interface User {
 }
 
 export default function UsersManager() {
+  const { user } = useAuth();
+  const isAdmin = Boolean(
+    user?.role === 'Quản trị' ||
+    user?.role === 'Admin' ||
+    user?.role === 'admin' ||
+    (user?.role && user.role.toLowerCase().includes('quản')) ||
+    (user?.role && user.role.toLowerCase().includes('admin'))
+  );
+
   const [users, setUsers] = useState<User[]>([]);
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -30,6 +40,7 @@ export default function UsersManager() {
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
+    if (!isAdmin) return;
     fetchUsers();
 
     const handleUsersUpdate = () => fetchUsers();
@@ -40,7 +51,7 @@ export default function UsersManager() {
       window.removeEventListener('users_updated', handleUsersUpdate);
       window.removeEventListener('supabase_config_updated', handleUsersUpdate);
     };
-  }, []);
+  }, [isAdmin]);
 
   const fetchUsers = async () => {
     try {
@@ -144,10 +155,20 @@ export default function UsersManager() {
       setFeedbackMsg({ type: 'success', text: newStatus ? 'Đã khóa tài khoản' : 'Đã mở khóa tài khoản' });
       setTimeout(() => setFeedbackMsg(null), 4000);
     } catch (error: any) {
-      setFeedbackMsg({ type: 'error', text: 'Lỗi khi cập nhật trạng thái khóa: ' + (error?.message || 'Vui lòng thử lại') });
-      setTimeout(() => setFeedbackMsg(null), 4000);
     }
   };
+
+  if (!isAdmin) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 p-8 text-center">
+        <ShieldAlert size={40} className="mx-auto text-amber-500 mb-3" />
+        <h3 className="text-lg font-bold text-zinc-900 mb-1">Quyền truy cập bị hạn chế</h3>
+        <p className="text-sm text-zinc-500">
+          Chức năng Quản lý Người dùng chỉ thuộc quyền hạn riêng của tài khoản <strong className="text-zinc-900">Quản trị</strong>.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-zinc-200 p-6">

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Edit2, Trash2, Search, Users, Shield, Save, X, Settings, UserCog, User, Swords, Megaphone, Trophy, Calendar, Database, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { LogOut, Edit2, Trash2, Search, Users, Shield, Save, X, Settings, UserCog, User, Swords, Megaphone, Trophy, Calendar, Database, CheckCircle2, AlertTriangle, Eye, Globe } from 'lucide-react';
 import { motion } from 'motion/react';
 import TeamsManager from './TeamsManager';
 import UsersManager from './UsersManager';
@@ -164,7 +164,7 @@ export default function AdminDashboard() {
   );
 
   useEffect(() => {
-    if (activeTab === 'database' && !isAdmin) {
+    if ((activeTab === 'database' || activeTab === 'users') && !isAdmin) {
       setActiveTab('registrations');
     }
   }, [activeTab, isAdmin]);
@@ -234,7 +234,16 @@ export default function AdminDashboard() {
               </div>
             </div>
             
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <button
+                onClick={() => navigate('/')}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 text-sm font-semibold transition-all shadow-sm"
+                title="Xem trang đầu (Trang đăng ký) mà không bị đăng xuất"
+              >
+                <Eye size={16} />
+                <span>Xem trang đầu</span>
+              </button>
+
               <div className="hidden md:flex items-center gap-2 text-sm text-zinc-600 bg-zinc-100 px-3 py-1.5 rounded-full">
                 <User size={16} />
                 <span className="font-medium">{user?.username}</span>

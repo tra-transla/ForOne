@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Send, CheckCircle2, Users, Swords, ChevronDown, ChevronRight, Megaphone, Trophy, Lock, Unlock, Trash2, X, AlertTriangle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Send, CheckCircle2, Users, Swords, ChevronDown, ChevronRight, Megaphone, Trophy, Lock, Unlock, Trash2, X, AlertTriangle, Shield, LayoutDashboard, Settings } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
   CampaignSettings,
@@ -19,6 +20,7 @@ import {
 
 export default function RegistrationForm() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({
     team: '',
     inGameName: '',
@@ -243,20 +245,35 @@ export default function RegistrationForm() {
     <div className="min-h-screen bg-zinc-50 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="mb-8 flex items-center gap-4">
-          <img 
-            src="https://i.ibb.co/nsCSz9mT/AFO.png" 
-            alt="Campaign Logo" 
-            className="w-[75px] h-[75px] object-contain drop-shadow-sm"
-          />
-          <div>
-            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-zinc-900">
-              {campaignSettings.campaign_name || 'Campaign 2026'}
-            </h1>
-            <p className="text-zinc-500 text-sm md:text-base">
-              {campaignSettings.phase_name || 'Spring Maneuvers'}: <span className="font-medium text-zinc-700">{campaignSettings.start_date}</span> đến <span className="font-medium text-zinc-700">{campaignSettings.end_date}</span>
-            </p>
+        <div className="mb-8 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <img 
+              src="https://i.ibb.co/nsCSz9mT/AFO.png" 
+              alt="Campaign Logo" 
+              className="w-[75px] h-[75px] object-contain drop-shadow-sm"
+            />
+            <div>
+              <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-zinc-900">
+                {campaignSettings.campaign_name || 'Campaign 2026'}
+              </h1>
+              <p className="text-zinc-500 text-sm md:text-base">
+                {campaignSettings.phase_name || 'Spring Maneuvers'}: <span className="font-medium text-zinc-700">{campaignSettings.start_date}</span> đến <span className="font-medium text-zinc-700">{campaignSettings.end_date}</span>
+              </p>
+            </div>
           </div>
+
+          {/* Small Gear Icon in corner for optimized UI */}
+          <button
+            onClick={() => navigate(user ? '/admin/dashboard' : '/admin/login')}
+            title={user ? `Bảng điều khiển (${user.username})` : 'Trang Quản trị'}
+            className="p-2.5 rounded-xl text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/60 transition-all relative group shrink-0"
+            aria-label="Quản trị"
+          >
+            <Settings size={22} className="transition-transform duration-300 group-hover:rotate-45" />
+            {user && (
+              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-indigo-600 ring-2 ring-zinc-50" />
+            )}
+          </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -370,9 +387,19 @@ export default function RegistrationForm() {
             </motion.div>
             
             <div className="mt-6 text-sm text-zinc-400 text-center lg:text-left">
-              <a href="/admin/login" className="hover:text-zinc-600 transition-colors font-medium">
-                → Trang Quản trị viên
-              </a>
+              {user ? (
+                <button 
+                  onClick={() => navigate('/admin/dashboard')}
+                  className="hover:text-indigo-600 transition-colors font-medium text-indigo-600 flex items-center justify-center lg:justify-start gap-1"
+                >
+                  <Shield size={16} />
+                  → Quay lại Bảng Điều Khiển
+                </button>
+              ) : (
+                <a href="/admin/login" className="hover:text-zinc-600 transition-colors font-medium">
+                  → Trang Quản trị viên
+                </a>
+              )}
             </div>
           </div>
 
