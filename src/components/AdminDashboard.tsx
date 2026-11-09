@@ -8,6 +8,7 @@ import UsersManager from './UsersManager';
 import NewsManager from './NewsManager';
 import CampaignSettingsManager from './CampaignSettingsManager';
 import DatabaseManager from './DatabaseManager';
+import MatchStatsManager from './MatchStatsManager';
 import {
   fetchTeamsSafe,
   fetchRegistrationsSafe,
@@ -37,7 +38,7 @@ export default function AdminDashboard() {
   const [teams, setTeams] = useState<TeamOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState<'registrations' | 'teams' | 'users' | 'news' | 'campaign' | 'database'>('registrations');
+  const [activeTab, setActiveTab] = useState<'registrations' | 'matches' | 'teams' | 'users' | 'news' | 'campaign' | 'database'>('registrations');
   
   const [editingId, setEditingId] = useState<string | number | null>(null);
   const [editForm, setEditForm] = useState({ team: '', inGameName: '', tanks: '' });
@@ -307,6 +308,18 @@ export default function AdminDashboard() {
             <Users size={18} />
             Đăng ký
           </button>
+
+          <button
+            onClick={() => setActiveTab('matches')}
+            className={`pb-4 px-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
+              activeTab === 'matches' 
+                ? 'border-indigo-600 text-indigo-600 font-semibold' 
+                : 'border-transparent text-zinc-500 hover:text-zinc-700 hover:border-zinc-300'
+            }`}
+          >
+            <Trophy size={18} className="text-amber-500" />
+            Thống kê Trận đánh
+          </button>
           
           {canManage && (
             <>
@@ -373,6 +386,7 @@ export default function AdminDashboard() {
           )}
         </div>
 
+        {activeTab === 'matches' && <MatchStatsManager canManage={canManage} />}
         {activeTab === 'teams' && canManage && <TeamsManager />}
         {activeTab === 'users' && isAdmin && <UsersManager />}
         {activeTab === 'news' && canManage && <NewsManager />}

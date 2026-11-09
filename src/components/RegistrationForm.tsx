@@ -11,11 +11,13 @@ import {
 import {
   TeamItem,
   RegistrationItem,
+  MatchItem,
   fetchTeamsSafe,
   fetchRegistrationsSafe,
   addRegistrationSafe,
   deleteRegistrationSafe,
-  fetchNewsSafe
+  fetchNewsSafe,
+  fetchMatchesSafe
 } from '../lib/schemaFallback';
 
 export default function RegistrationForm() {
@@ -32,8 +34,9 @@ export default function RegistrationForm() {
   const [teams, setTeams] = useState<TeamItem[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(true);
   const [loadingRegistrations, setLoadingRegistrations] = useState(true);
-  const [listTab, setListTab] = useState<'all' | 'results'>('all');
+  const [listTab, setListTab] = useState<'all' | 'results' | 'matches'>('all');
   const [news, setNews] = useState<any[]>([]);
+  const [matches, setMatches] = useState<MatchItem[]>([]);
   const [expandedTeams, setExpandedTeams] = useState<Record<string, boolean>>({});
   const [campaignSettings, setCampaignSettings] = useState<CampaignSettings>(getStoredCampaignSettings);
   const [deletingMember, setDeletingMember] = useState<RegistrationItem | null>(null);
@@ -56,6 +59,7 @@ export default function RegistrationForm() {
     fetchRegistrations();
     fetchTeams();
     fetchNews();
+    fetchMatches();
 
     // Fetch campaign settings
     const loadCampaign = async () => {
@@ -71,23 +75,27 @@ export default function RegistrationForm() {
     const handleTeamsUpdate = () => fetchTeams();
     const handleRegistrationsUpdate = () => fetchRegistrations();
     const handleNewsUpdate = () => fetchNews();
+    const handleMatchesUpdate = () => fetchMatches();
 
     const handleSupabaseConfigUpdate = () => {
       fetchTeams();
       fetchRegistrations();
       fetchNews();
+      fetchMatches();
     };
 
     window.addEventListener('campaign_settings_updated', handleSettingsUpdate);
     window.addEventListener('teams_updated', handleTeamsUpdate);
     window.addEventListener('registrations_updated', handleRegistrationsUpdate);
     window.addEventListener('news_updated', handleNewsUpdate);
+    window.addEventListener('matches_updated', handleMatchesUpdate);
     window.addEventListener('supabase_config_updated', handleSupabaseConfigUpdate);
 
     // Polling interval to keep data synchronized
     const interval = setInterval(() => {
       fetchRegistrations();
       fetchTeams();
+      fetchMatches();
     }, 15000);
 
     return () => {
@@ -96,6 +104,7 @@ export default function RegistrationForm() {
       window.removeEventListener('teams_updated', handleTeamsUpdate);
       window.removeEventListener('registrations_updated', handleRegistrationsUpdate);
       window.removeEventListener('news_updated', handleNewsUpdate);
+      window.removeEventListener('matches_updated', handleMatchesUpdate);
       window.removeEventListener('supabase_config_updated', handleSupabaseConfigUpdate);
     };
   }, []);
@@ -124,6 +133,13 @@ export default function RegistrationForm() {
     try {
       const { data } = await fetchNewsSafe();
       if (data) setNews(data);
+    } catch {}
+  };
+
+  const fetchMatches = async () => {
+    try {
+      const { data } = await fetchMatchesSafe();
+      if (data) setMatches(data);
     } catch {}
   };
 
@@ -457,9 +473,18 @@ export default function RegistrationForm() {
 
                 <div className="flex bg-zinc-100 p-1 rounded-xl">
                   <button
+                    onClick={() => setListTab('matches')}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                      listTab === 'matches' ? 'bg-white text-zinc-900 shadow-sm font-bold' : 'text-zinc-500 hover:text-zinc-700'
+                    }`}
+                  >
+                    <Swords size={16} className={listTab === 'matches' ? "text-indigo-600" : ""} />
+                    <span>Lịch sử trận đánh ({matches.length})</span>
+                  </button>
+                  <button
                     onClick={() => setListTab('results')}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
-                      listTab === 'results' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
+                      listTab === 'results' ? 'bg-white text-zinc-900 shadow-sm font-bold' : 'text-zinc-500 hover:text-zinc-700'
                     }`}
                   >
                     <Trophy size={16} className={listTab === 'results' ? "text-yellow-500" : ""} />
@@ -468,10 +493,10 @@ export default function RegistrationForm() {
                   <button
                     onClick={() => setListTab('all')}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      listTab === 'all' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
+                      listTab === 'all' ? 'bg-white text-zinc-900 shadow-sm font-bold' : 'text-zinc-500 hover:text-zinc-700'
                     }`}
                   >
-                    Danh sách các Team ({teams.length})
+                    Danh sách Team ({teams.length})
                   </button>
                 </div>
               </div>
@@ -480,6 +505,65 @@ export default function RegistrationForm() {
                 <div className="flex justify-center items-center h-64 text-zinc-500 text-sm">
                   Đang tải dữ liệu chiến dịch...
                 </div>
+              ) : listTab === 'matches' ? (
+                /* Matches Tab */
+                matches.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-64 text-zinc-400">
+                    <Swords size={48} className="mb-4 opacity-20" />
+                    <p className="text-sm">Chưa có thông số trận đánh nào được ghi nhận</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="bg-indigo-900 text-white p-4 rounded-xl flex items-center justify-between shadow-sm">
+                      <div className="flex items-center gap-2">
+                        <Swords size={20} className="text-amber-400" />
+                        <div>
+                          <h3 className="font-bold text-sm">Nhật ký & Kết quả trận đánh Campaign 2026</h3>
+                          <p className="text-xs text-indigo-200">Tổng cộng {matches.length} trận đấu đã được ghi nhận</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto rounded-xl border border-zinc-200 shadow-xs">
+                      <table className="w-full text-left border-collapse bg-white text-sm">
+                        <thead>
+                          <tr className="bg-zinc-100 border-b border-zinc-200 text-xs font-semibold text-zinc-600">
+                            <th className="px-4 py-3">Ngày</th>
+                            <th className="px-4 py-3 text-center">Trận đấu</th>
+                            <th className="px-4 py-3 text-center">Tỷ số</th>
+                            <th className="px-4 py-3 text-center">Đội thắng</th>
+                            <th className="px-4 py-3">Ghi chú</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-200">
+                          {matches.map((m) => (
+                            <tr key={m.id} className="hover:bg-zinc-50 transition-colors">
+                              <td className="px-4 py-3 text-zinc-500 font-mono text-xs">{m.match_date}</td>
+                              <td className="px-4 py-3 text-center font-medium text-zinc-900">
+                                {m.team_a} vs {m.team_b}
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="px-2.5 py-1 bg-zinc-900 text-white rounded font-mono text-xs font-bold">
+                                  {m.team_a_score} - {m.team_b_score}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                {m.winner_team === 'Hòa' ? (
+                                  <span className="px-2 py-0.5 bg-amber-100 text-amber-700 font-bold text-xs rounded">Hòa</span>
+                                ) : (
+                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 font-bold text-xs rounded">
+                                    🏆 {m.winner_team}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-zinc-500 text-xs italic">{m.notes || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
               ) : listTab === 'results' ? (
                 /* Results Tab */
                 winnerRegistrations.length === 0 ? (

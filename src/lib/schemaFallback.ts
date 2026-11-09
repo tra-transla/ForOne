@@ -31,12 +31,26 @@ export interface UserItem {
   is_locked?: boolean;
 }
 
+export interface MatchItem {
+  id: string;
+  match_date: string;
+  team_a: string;
+  team_b: string;
+  team_a_score: number;
+  team_b_score: number;
+  winner_team: string;
+  loser_team: string;
+  notes?: string;
+  created_at: string;
+}
+
 const LOCAL_TEAMS_KEY = 'app_teams_list';
 const LOCAL_LOCKED_TEAMS_KEY = 'app_locked_teams_list';
 const LOCAL_REGISTRATIONS_KEY = 'app_registrations_list';
 const LOCAL_WINNERS_KEY = 'app_winner_reg_ids_list';
 const LOCAL_NEWS_KEY = 'app_news_articles_list';
 const LOCAL_USERS_KEY = 'app_users_list';
+const LOCAL_MATCHES_KEY = 'app_matches_list';
 
 export function isValidUuid(val: any): boolean {
   if (!val || typeof val !== 'string') return false;
@@ -98,6 +112,69 @@ export const DEFAULT_USERS: UserItem[] = [
     password: 'operator123',
     role: 'Điều hành',
     is_locked: false
+  }
+];
+
+export const DEFAULT_MATCHES: MatchItem[] = [
+  {
+    id: 'm1-2026-03-23-01',
+    match_date: '2026-03-23',
+    team_a: 'Team 1: Leader Cá Kiếm',
+    team_b: 'Team 2: Leader Minato',
+    team_a_score: 3,
+    team_b_score: 1,
+    winner_team: 'Team 1: Leader Cá Kiếm',
+    loser_team: 'Team 2: Leader Minato',
+    notes: 'Trận mở màn chiến dịch - Map Malinovka',
+    created_at: '2026-03-23T14:30:00Z'
+  },
+  {
+    id: 'm2-2026-03-23-02',
+    match_date: '2026-03-23',
+    team_a: 'Team 3: Đấu giá',
+    team_b: 'Team 4: Vá lốp',
+    team_a_score: 2,
+    team_b_score: 3,
+    winner_team: 'Team 4: Vá lốp',
+    loser_team: 'Team 3: Đấu giá',
+    notes: 'Map Himmelsdorf - Kịch tính đến phút cuối',
+    created_at: '2026-03-23T16:00:00Z'
+  },
+  {
+    id: 'm3-2026-03-24-01',
+    match_date: '2026-03-24',
+    team_a: 'Team 1: Leader Cá Kiếm',
+    team_b: 'Team 3: Đấu giá',
+    team_a_score: 3,
+    team_b_score: 0,
+    winner_team: 'Team 1: Leader Cá Kiếm',
+    loser_team: 'Team 3: Đấu giá',
+    notes: 'Thắng áp đảo - Map Prokhorovka',
+    created_at: '2026-03-24T15:00:00Z'
+  },
+  {
+    id: 'm4-2026-03-24-02',
+    match_date: '2026-03-24',
+    team_a: 'Team 2: Leader Minato',
+    team_b: 'Team 4: Vá lốp',
+    team_a_score: 3,
+    team_b_score: 2,
+    winner_team: 'Team 2: Leader Minato',
+    loser_team: 'Team 4: Vá lốp',
+    notes: 'Lội ngược dòng phút 14',
+    created_at: '2026-03-24T17:15:00Z'
+  },
+  {
+    id: 'm5-2026-03-25-01',
+    match_date: '2026-03-25',
+    team_a: 'Team 1: Leader Cá Kiếm',
+    team_b: 'Team 4: Vá lốp',
+    team_a_score: 2,
+    team_b_score: 2,
+    winner_team: 'Hòa',
+    loser_team: '',
+    notes: 'Hòa điểm kỹ thuật - Trận đánh nghẹt thở',
+    created_at: '2026-03-25T14:00:00Z'
   }
 ];
 
@@ -896,6 +973,161 @@ export async function toggleUserLockSafe(id: string | number, currentLocked?: bo
   }
 
   return newLocked;
+}
+
+// ==========================================
+// MATCHES HELPERS
+// ==========================================
+
+export function getLocalMatches(): MatchItem[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_MATCHES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return DEFAULT_MATCHES;
+}
+
+export function saveLocalMatches(matches: MatchItem[]) {
+  try {
+    localStorage.setItem(LOCAL_MATCHES_KEY, JSON.stringify(matches));
+  } catch {}
+}
+
+export async function fetchMatchesSafe(): Promise<{ data: MatchItem[] }> {
+  // 1. Primary: Supabase Cloud Database
+  try {
+    const { data, error } = await supabase.from('matches').select('*').order('match_date', { ascending: false });
+    if (!error && Array.isArray(data)) {
+      if (data.length > 0) {
+        saveLocalMatches(data);
+        return { data };
+      } else {
+        try {
+          await supabase.from('matches').upsert(DEFAULT_MATCHES, { onConflict: 'id' });
+        } catch {}
+        saveLocalMatches(DEFAULT_MATCHES);
+        return { data: DEFAULT_MATCHES };
+      }
+    }
+  } catch (err) {
+    console.warn('Supabase fetchMatches error:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite
+  try {
+    const res = await fetch('/api/matches');
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        saveLocalMatches(data);
+        return { data };
+      }
+    }
+  } catch (err) {
+    console.warn('fetchMatchesSafe API error:', err);
+  }
+
+  return { data: getLocalMatches() };
+}
+
+export async function addMatchSafe(match: Omit<MatchItem, 'id' | 'created_at'> & { id?: string }): Promise<{ match: MatchItem; error?: string }> {
+  const currentMatches = getLocalMatches();
+  const matchId = match.id || generateClientUuid();
+  const scoreA = Number(match.team_a_score || 0);
+  const scoreB = Number(match.team_b_score || 0);
+  const winner = match.winner_team !== undefined ? match.winner_team : (scoreA > scoreB ? match.team_a : (scoreB > scoreA ? match.team_b : 'Hòa'));
+  const loser = match.loser_team !== undefined ? match.loser_team : (scoreA > scoreB ? match.team_b : (scoreB > scoreA ? match.team_a : ''));
+
+  const newMatch: MatchItem = {
+    id: matchId,
+    match_date: match.match_date || new Date().toISOString().split('T')[0],
+    team_a: match.team_a,
+    team_b: match.team_b,
+    team_a_score: scoreA,
+    team_b_score: scoreB,
+    winner_team: winner,
+    loser_team: loser,
+    notes: match.notes || '',
+    created_at: new Date().toISOString()
+  };
+
+  // 1. Primary: Supabase Cloud Database
+  try {
+    await supabase.from('matches').insert([newMatch]);
+  } catch (err) {
+    console.warn('Supabase addMatch error:', err);
+  }
+
+  // 2. Secondary: Local Server SQLite
+  try {
+    await fetch('/api/matches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newMatch)
+    });
+  } catch (err: any) {
+    console.warn('addMatch API error:', err);
+  }
+
+  const updated = [newMatch, ...currentMatches];
+  saveLocalMatches(updated);
+  window.dispatchEvent(new CustomEvent('matches_updated'));
+  return { match: newMatch };
+}
+
+export async function updateMatchSafe(id: string, match: Partial<MatchItem>): Promise<{ success: boolean; error?: string }> {
+  const currentMatches = getLocalMatches();
+  const updated = currentMatches.map(m => (m.id === id ? { ...m, ...match } : m));
+  saveLocalMatches(updated);
+
+  // 1. Supabase Cloud Database
+  try {
+    await supabase.from('matches').update(match).eq('id', id);
+  } catch (err) {
+    console.warn('Supabase updateMatch error:', err);
+  }
+
+  // 2. Local Server SQLite
+  try {
+    const encodedId = encodeURIComponent(id);
+    await fetch(`/api/matches/${encodedId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(match)
+    });
+  } catch (err: any) {
+    console.warn('updateMatch API error:', err);
+  }
+
+  window.dispatchEvent(new CustomEvent('matches_updated'));
+  return { success: true };
+}
+
+export async function deleteMatchSafe(id: string): Promise<{ success: boolean; error?: string }> {
+  const currentMatches = getLocalMatches();
+  const updated = currentMatches.filter(m => m.id !== id);
+  saveLocalMatches(updated);
+
+  // 1. Supabase Cloud Database
+  try {
+    await supabase.from('matches').delete().eq('id', id);
+  } catch (err) {
+    console.warn('Supabase deleteMatch error:', err);
+  }
+
+  // 2. Local Server SQLite
+  const encodedId = encodeURIComponent(id);
+  try {
+    await fetch(`/api/matches/${encodedId}`, { method: 'DELETE' });
+  } catch (err: any) {
+    console.warn('deleteMatch API error:', err);
+  }
+
+  window.dispatchEvent(new CustomEvent('matches_updated'));
+  return { success: true };
 }
 
 /**

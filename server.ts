@@ -161,11 +161,13 @@ app.get('/api/db/status', async (req, res) => {
     const teamCount = await executeDb('SELECT COUNT(*) as count FROM teams');
     const regCount = await executeDb('SELECT COUNT(*) as count FROM registrations');
     const newsCount = await executeDb('SELECT COUNT(*) as count FROM news');
+    const matchCount = await executeDb('SELECT COUNT(*) as count FROM matches');
     stats = {
       users: userCount.results[0]?.count ?? 0,
       teams: teamCount.results[0]?.count ?? 0,
       registrations: regCount.results[0]?.count ?? 0,
       news: newsCount.results[0]?.count ?? 0,
+      matches: matchCount.results[0]?.count ?? 0,
     };
   } catch (err: any) {
     stats = { error: err.message };
@@ -546,6 +548,103 @@ app.delete('/api/news/:id', async (req, res) => {
     });
 
     res.json({ message: 'News deleted successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Matches API (Battle results & statistics)
+app.get('/api/matches', async (req, res) => {
+  try {
+    const { results } = await executeDb('SELECT * FROM matches ORDER BY match_date DESC, created_at DESC');
+    res.json(results);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/matches', async (req, res) => {
+  const { id, match_date, team_a, team_b, team_a_score, team_b_score, winner_team, loser_team, notes } = req.body;
+  if (!team_a || !team_b) return res.status(400).json({ error: 'Thông tin đội đấu không được để trống' });
+  try {
+    const matchId = id || crypto.randomUUID();
+    const dateStr = match_date || new Date().toISOString().split('T')[0];
+    const scoreA = Number(team_a_score || 0);
+    const scoreB = Number(team_b_score || 0);
+    const winner = winner_team !== undefined ? winner_team : (scoreA > scoreB ? team_a : (scoreB > scoreA ? team_b : 'Hòa'));
+    const loser = loser_team !== undefined ? loser_team : (scoreA > scoreB ? team_b : (scoreB > scoreA ? team_a : ''));
+
+    await executeDb(
+      `INSERT INTO matches (id, match_date, team_a, team_b, team_a_score, team_b_score, winner_team, loser_team, notes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [matchId, dateStr, team_a, team_b, scoreA, scoreB, winner, loser, notes || '']
+    );
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('matches').upsert([{
+          id: matchId,
+          match_date: dateStr,
+          team_a,
+          team_b,
+          team_a_score: scoreA,
+          team_b_score: scoreB,
+          winner_team: winner,
+          loser_team: loser,
+          notes: notes || ''
+        }], { onConflict: 'id' });
+      }
+    });
+
+    res.status(201).json({ id: matchId, match_date: dateStr, team_a, team_b, team_a_score: scoreA, team_b_score: scoreB, winner_team: winner, loser_team: loser, notes });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/matches/:id', async (req, res) => {
+  const { id } = req.params;
+  const { match_date, team_a, team_b, team_a_score, team_b_score, winner_team, loser_team, notes } = req.body;
+  try {
+    const scoreA = Number(team_a_score || 0);
+    const scoreB = Number(team_b_score || 0);
+    const winner = winner_team !== undefined ? winner_team : (scoreA > scoreB ? team_a : (scoreB > scoreA ? team_b : 'Hòa'));
+    const loser = loser_team !== undefined ? loser_team : (scoreA > scoreB ? team_b : (scoreB > scoreA ? team_a : ''));
+
+    await executeDb(
+      `UPDATE matches SET match_date = ?, team_a = ?, team_b = ?, team_a_score = ?, team_b_score = ?, winner_team = ?, loser_team = ?, notes = ? WHERE id = ?`,
+      [match_date, team_a, team_b, scoreA, scoreB, winner, loser, notes || '', id]
+    );
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('matches').update({
+          match_date, team_a, team_b, team_a_score: scoreA, team_b_score: scoreB, winner_team: winner, loser_team: loser, notes: notes || ''
+        }).eq('id', id);
+      }
+    });
+
+    res.json({ message: 'Match updated successfully' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/matches/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await executeDb('DELETE FROM matches WHERE id = ?', [id]);
+
+    runAsync(async () => {
+      const client = getServerSupabaseClient();
+      if (client) {
+        await client.from('matches').delete().eq('id', id);
+      }
+    });
+
+    res.json({ message: 'Match deleted successfully' });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
