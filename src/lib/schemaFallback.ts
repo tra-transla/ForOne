@@ -1135,7 +1135,7 @@ export async function deleteMatchSafe(id: string): Promise<{ success: boolean; e
  */
 export async function syncAllLocalToSupabase(): Promise<{
   success: boolean;
-  count: { teams: number; regs: number; news: number; users: number; settings: number };
+  count: { teams: number; regs: number; news: number; users: number; matches: number; settings: number };
   error?: string;
 }> {
   try {
@@ -1143,6 +1143,7 @@ export async function syncAllLocalToSupabase(): Promise<{
     const regs = getLocalRegistrations();
     const news = getLocalNews();
     const users = getLocalUsers();
+    const matches = getLocalMatches();
 
     let campaignSettings = null;
     try {
@@ -1155,6 +1156,7 @@ export async function syncAllLocalToSupabase(): Promise<{
       registrations: regs,
       users,
       news,
+      matches,
       campaign_settings: campaignSettings
     });
 
@@ -1167,13 +1169,14 @@ export async function syncAllLocalToSupabase(): Promise<{
         regs: res.details?.registrations ?? regs.length,
         news: res.details?.news ?? news.length,
         users: res.details?.users ?? users.length,
+        matches: res.details?.matches ?? matches.length,
         settings: res.details?.settings ?? 1
       }
     };
   } catch (err: any) {
     return {
       success: false,
-      count: { teams: 0, regs: 0, news: 0, users: 0, settings: 0 },
+      count: { teams: 0, regs: 0, news: 0, users: 0, matches: 0, settings: 0 },
       error: err?.message || 'Có lỗi khi đồng bộ dữ liệu sang Supabase Cloud Database'
     };
   }

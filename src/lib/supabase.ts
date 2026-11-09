@@ -246,6 +246,7 @@ export interface SupabaseDiagnosticResult {
     registrations: boolean;
     users: boolean;
     news: boolean;
+    matches: boolean;
     campaign_settings: boolean;
   };
   counts?: {
@@ -253,6 +254,7 @@ export interface SupabaseDiagnosticResult {
     registrations?: number;
     users?: number;
     news?: number;
+    matches?: number;
   };
   canWrite?: boolean;
 }
@@ -309,6 +311,7 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
     registrations: false,
     users: false,
     news: false,
+    matches: false,
     campaign_settings: false
   };
   const counts: Record<string, number> = {};
@@ -320,6 +323,7 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
       testClient.from('registrations').select('id', { count: 'exact' }).limit(1),
       testClient.from('users').select('id', { count: 'exact' }).limit(1),
       testClient.from('news').select('id', { count: 'exact' }).limit(1),
+      testClient.from('matches').select('id', { count: 'exact' }).limit(1),
       testClient.from('campaign_settings').select('id').limit(1)
     ]);
 
@@ -327,10 +331,10 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
       setTimeout(() => reject(new Error('REQUEST_TIMEOUT')), 10000)
     );
 
-    const [tTeams, tRegs, tUsers, tNews, tCS] = await Promise.race([queryPromise, timeoutPromise]);
+    const [tTeams, tRegs, tUsers, tNews, tMatches, tCS] = await Promise.race([queryPromise, timeoutPromise]);
 
     // Analyze errors to distinguish Invalid Key vs Missing Tables vs Paused DNS
-    const errors = [tTeams.error, tRegs.error, tUsers.error, tNews.error, tCS.error].filter(Boolean);
+    const errors = [tTeams.error, tRegs.error, tUsers.error, tNews.error, tMatches.error, tCS.error].filter(Boolean);
 
     // Check if any error is an Auth or API Key error (status 401/403 or JWT/apikey error)
     const isAuthError = errors.some(
@@ -366,6 +370,9 @@ export async function runSupabaseDiagnostics(customUrl?: string, customKey?: str
 
     tables.news = !tNews.error;
     if (tNews.count !== null && tNews.count !== undefined) counts.news = tNews.count;
+
+    tables.matches = !tMatches.error;
+    if (tMatches.count !== null && tMatches.count !== undefined) counts.matches = tMatches.count;
 
     tables.campaign_settings = !tCS.error;
 
@@ -439,6 +446,7 @@ export async function syncAllDataToSupabase(payload: {
   registrations: any[];
   users: any[];
   news: any[];
+  matches?: any[];
   campaign_settings?: any;
 }): Promise<{ success: boolean; details?: Record<string, number>; error?: string }> {
   const client = getActiveSupabaseClient();
@@ -447,6 +455,7 @@ export async function syncAllDataToSupabase(payload: {
     registrations: 0,
     users: 0,
     news: 0,
+    matches: 0,
     settings: 0
   };
 
@@ -503,7 +512,25 @@ export async function syncAllDataToSupabase(payload: {
       if (!error) details.news = cleanNews.length;
     }
 
-    // 5. Sync campaign settings
+    // 5. Sync matches
+    if (payload.matches && payload.matches.length > 0) {
+      const cleanMatches = payload.matches.map(m => ({
+        id: m.id,
+        match_date: m.match_date,
+        team_a: m.team_a,
+        team_b: m.team_b,
+        team_a_score: Number(m.team_a_score || 0),
+        team_b_score: Number(m.team_b_score || 0),
+        winner_team: m.winner_team || '',
+        loser_team: m.loser_team || '',
+        notes: m.notes || '',
+        created_at: m.created_at || new Date().toISOString()
+      }));
+      const { error } = await client.from('matches').upsert(cleanMatches, { onConflict: 'id' });
+      if (!error) details.matches = cleanMatches.length;
+    }
+
+    // 6. Sync campaign settings
     if (payload.campaign_settings) {
       const cs = payload.campaign_settings;
       const { error } = await client.from('campaign_settings').upsert({

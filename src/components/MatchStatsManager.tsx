@@ -213,47 +213,43 @@ export default function MatchStatsManager({ canManage = true }: MatchStatsManage
     }
   };
 
-  // Statistics Calculations
+  // Statistics Calculations - Chỉ thống kê cho Đội A, không thống kê Đội B
   const teamStats = useMemo(() => {
     const map: Record<string, { name: string; total: number; wins: number; losses: number; draws: number; goalsFor: number; goalsAgainst: number; recent: string[] }> = {};
 
-    // Initialize map with all known teams
+    // Initialize map with all registered campaign teams
     teams.forEach(t => {
       map[t.name] = { name: t.name, total: 0, wins: 0, losses: 0, draws: 0, goalsFor: 0, goalsAgainst: 0, recent: [] };
     });
 
-    // Process all matches (sort chronological first to collect recent form)
+    // Process all matches chronologically for Team A only
     const sortedChrono = [...matches].sort((a, b) => new Date(a.created_at || a.match_date).getTime() - new Date(b.created_at || b.match_date).getTime());
 
     sortedChrono.forEach(m => {
       const teamA = m.team_a;
-      const teamB = m.team_b;
+      if (!teamA) return;
 
-      if (!map[teamA]) map[teamA] = { name: teamA, total: 0, wins: 0, losses: 0, draws: 0, goalsFor: 0, goalsAgainst: 0, recent: [] };
-      if (!map[teamB]) map[teamB] = { name: teamB, total: 0, wins: 0, losses: 0, draws: 0, goalsFor: 0, goalsAgainst: 0, recent: [] };
+      // Ensure Team A exists in map
+      if (!map[teamA]) {
+        map[teamA] = { name: teamA, total: 0, wins: 0, losses: 0, draws: 0, goalsFor: 0, goalsAgainst: 0, recent: [] };
+      }
 
       map[teamA].total += 1;
-      map[teamB].total += 1;
       map[teamA].goalsFor += m.team_a_score || 0;
       map[teamA].goalsAgainst += m.team_b_score || 0;
-      map[teamB].goalsFor += m.team_b_score || 0;
-      map[teamB].goalsAgainst += m.team_a_score || 0;
 
-      if (m.winner_team === teamA) {
+      const isWin = m.winner_team === teamA || (m.team_a_score > m.team_b_score && m.winner_team !== 'Hòa' && m.winner_team !== m.team_b);
+      const isDraw = m.winner_team === 'Hòa' || (m.team_a_score === m.team_b_score && (!m.winner_team || m.winner_team === 'Hòa'));
+
+      if (isWin) {
         map[teamA].wins += 1;
         map[teamA].recent.push('W');
-        map[teamB].losses += 1;
-        map[teamB].recent.push('L');
-      } else if (m.winner_team === teamB) {
-        map[teamB].wins += 1;
-        map[teamB].recent.push('W');
-        map[teamA].losses += 1;
-        map[teamA].recent.push('L');
-      } else {
+      } else if (isDraw) {
         map[teamA].draws += 1;
         map[teamA].recent.push('D');
-        map[teamB].draws += 1;
-        map[teamB].recent.push('D');
+      } else {
+        map[teamA].losses += 1;
+        map[teamA].recent.push('L');
       }
     });
 
@@ -275,13 +271,12 @@ export default function MatchStatsManager({ canManage = true }: MatchStatsManage
     });
   }, [matches, teams]);
 
-  // All known team names (including external teams)
+  // All known team names (Đội A) for filter dropdown
   const allKnownTeamNames = useMemo(() => {
     const set = new Set<string>();
     teams.forEach(t => set.add(t.name));
     matches.forEach(m => {
       if (m.team_a) set.add(m.team_a);
-      if (m.team_b) set.add(m.team_b);
     });
     return Array.from(set);
   }, [teams, matches]);

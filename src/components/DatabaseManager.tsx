@@ -39,7 +39,8 @@ import {
   getLocalTeams,
   getLocalRegistrations,
   getLocalUsers,
-  getLocalNews
+  getLocalNews,
+  getLocalMatches
 } from '../lib/schemaFallback';
 
 const SUPABASE_SCHEMA_SQL = `-- ==============================================================
@@ -126,18 +127,34 @@ INSERT INTO campaign_settings (id, campaign_name, phase_name, start_date, end_da
 VALUES (1, 'Campaign 2026', 'Spring Maneuvers', '23/03/2026', '06/04/2026')
 ON CONFLICT (id) DO NOTHING;
 
--- 6. TẮT ROW LEVEL SECURITY (RLS) để Anon Key có thể truy vấn và thao tác
+-- 6. BẢNG MATCHES (Thống kê Trận đánh & Kết quả Thắng/Thua)
+CREATE TABLE IF NOT EXISTS matches (
+  id TEXT PRIMARY KEY,
+  match_date TEXT NOT NULL,
+  team_a TEXT NOT NULL,
+  team_b TEXT NOT NULL,
+  team_a_score INT DEFAULT 0,
+  team_b_score INT DEFAULT 0,
+  winner_team TEXT DEFAULT '',
+  loser_team TEXT DEFAULT '',
+  notes TEXT DEFAULT '',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- 7. TẮT ROW LEVEL SECURITY (RLS) để Anon Key có thể truy vấn và thao tác
 ALTER TABLE users DISABLE ROW LEVEL SECURITY;
 ALTER TABLE teams DISABLE ROW LEVEL SECURITY;
 ALTER TABLE registrations DISABLE ROW LEVEL SECURITY;
 ALTER TABLE news DISABLE ROW LEVEL SECURITY;
+ALTER TABLE matches DISABLE ROW LEVEL SECURITY;
 ALTER TABLE campaign_settings DISABLE ROW LEVEL SECURITY;
 
--- 7. CẤP QUYỀN ĐẦY ĐỦ CHO ROLE ANON VÀ AUTHENTICATED
+-- 8. CẤP QUYỀN ĐẦY ĐỦ CHO ROLE ANON VÀ AUTHENTICATED
 GRANT ALL ON TABLE users TO anon, authenticated;
 GRANT ALL ON TABLE teams TO anon, authenticated;
 GRANT ALL ON TABLE registrations TO anon, authenticated;
 GRANT ALL ON TABLE news TO anon, authenticated;
+GRANT ALL ON TABLE matches TO anon, authenticated;
 GRANT ALL ON TABLE campaign_settings TO anon, authenticated;
 `;
 
@@ -166,7 +183,7 @@ export default function DatabaseManager() {
   const [syncResult, setSyncResult] = useState<{
     success: boolean;
     message: string;
-    counts?: { teams: number; regs: number; news: number; users: number; settings: number };
+    counts?: { teams: number; regs: number; news: number; users: number; matches: number; settings: number };
   } | null>(null);
 
   // Local Counts
@@ -174,7 +191,8 @@ export default function DatabaseManager() {
     teams: 0,
     regs: 0,
     users: 0,
-    news: 0
+    news: 0,
+    matches: 0
   });
 
   useEffect(() => {
@@ -193,7 +211,8 @@ export default function DatabaseManager() {
         teams: getLocalTeams().length,
         regs: getLocalRegistrations().length,
         users: getLocalUsers().length,
-        news: getLocalNews().length
+        news: getLocalNews().length,
+        matches: getLocalMatches().length
       });
     } catch {}
   };
@@ -444,12 +463,13 @@ export default function DatabaseManager() {
 
           {/* Tables checklist if table details available */}
           {diagResult.tables && (
-            <div className="mt-5 pt-4 border-t border-zinc-200/60 grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div className="mt-5 pt-4 border-t border-zinc-200/60 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
               {[
                 { name: 'teams', label: 'Bảng Đội tuyển (teams)', ok: diagResult.tables.teams, count: diagResult.counts?.teams },
                 { name: 'registrations', label: 'Bảng Đăng ký (registrations)', ok: diagResult.tables.registrations, count: diagResult.counts?.registrations },
                 { name: 'users', label: 'Bảng Quản trị (users)', ok: diagResult.tables.users, count: diagResult.counts?.users },
                 { name: 'news', label: 'Bảng Tin tức (news)', ok: diagResult.tables.news, count: diagResult.counts?.news },
+                { name: 'matches', label: 'Bảng Trận đánh (matches)', ok: diagResult.tables.matches, count: diagResult.counts?.matches },
                 { name: 'campaign_settings', label: 'Cấu hình sự kiện', ok: diagResult.tables.campaign_settings }
               ].map(tb => (
                 <div
