@@ -75,7 +75,9 @@ export default function MatchStatsManager({ canManage = true }: MatchStatsManage
         fetchMatchesSafe(),
         fetchTeamsSafe()
       ]);
-      setMatches(matchesRes.data || []);
+      // Filter out any previous sample matches
+      const realMatches = (matchesRes.data || []).filter(m => !/^m[1-5]-2026/.test(m.id));
+      setMatches(realMatches);
       setTeams(teamsRes.data || []);
       
       if (teamsRes.data && teamsRes.data.length >= 2 && !formTeamA) {

@@ -115,68 +115,7 @@ export const DEFAULT_USERS: UserItem[] = [
   }
 ];
 
-export const DEFAULT_MATCHES: MatchItem[] = [
-  {
-    id: 'm1-2026-03-23-01',
-    match_date: '2026-03-23',
-    team_a: 'Team 1: Leader Cá Kiếm',
-    team_b: 'Team 2: Leader Minato',
-    team_a_score: 3,
-    team_b_score: 1,
-    winner_team: 'Team 1: Leader Cá Kiếm',
-    loser_team: 'Team 2: Leader Minato',
-    notes: 'Trận mở màn chiến dịch - Map Malinovka',
-    created_at: '2026-03-23T14:30:00Z'
-  },
-  {
-    id: 'm2-2026-03-23-02',
-    match_date: '2026-03-23',
-    team_a: 'Team 3: Đấu giá',
-    team_b: 'Team 4: Vá lốp',
-    team_a_score: 2,
-    team_b_score: 3,
-    winner_team: 'Team 4: Vá lốp',
-    loser_team: 'Team 3: Đấu giá',
-    notes: 'Map Himmelsdorf - Kịch tính đến phút cuối',
-    created_at: '2026-03-23T16:00:00Z'
-  },
-  {
-    id: 'm3-2026-03-24-01',
-    match_date: '2026-03-24',
-    team_a: 'Team 1: Leader Cá Kiếm',
-    team_b: 'Team 3: Đấu giá',
-    team_a_score: 3,
-    team_b_score: 0,
-    winner_team: 'Team 1: Leader Cá Kiếm',
-    loser_team: 'Team 3: Đấu giá',
-    notes: 'Thắng áp đảo - Map Prokhorovka',
-    created_at: '2026-03-24T15:00:00Z'
-  },
-  {
-    id: 'm4-2026-03-24-02',
-    match_date: '2026-03-24',
-    team_a: 'Team 2: Leader Minato',
-    team_b: 'Team 4: Vá lốp',
-    team_a_score: 3,
-    team_b_score: 2,
-    winner_team: 'Team 2: Leader Minato',
-    loser_team: 'Team 4: Vá lốp',
-    notes: 'Lội ngược dòng phút 14',
-    created_at: '2026-03-24T17:15:00Z'
-  },
-  {
-    id: 'm5-2026-03-25-01',
-    match_date: '2026-03-25',
-    team_a: 'Team 1: Leader Cá Kiếm',
-    team_b: 'Team 4: Vá lốp',
-    team_a_score: 2,
-    team_b_score: 2,
-    winner_team: 'Hòa',
-    loser_team: '',
-    notes: 'Hòa điểm kỹ thuật - Trận đánh nghẹt thở',
-    created_at: '2026-03-25T14:00:00Z'
-  }
-];
+export const DEFAULT_MATCHES: MatchItem[] = [];
 
 // ==========================================
 // TEAMS HELPERS
@@ -982,12 +921,12 @@ export async function toggleUserLockSafe(id: string | number, currentLocked?: bo
 export function getLocalMatches(): MatchItem[] {
   try {
     const raw = localStorage.getItem(LOCAL_MATCHES_KEY);
-    if (raw) {
+    if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed)) return parsed;
     }
   } catch {}
-  return DEFAULT_MATCHES;
+  return [];
 }
 
 export function saveLocalMatches(matches: MatchItem[]) {
@@ -1001,16 +940,8 @@ export async function fetchMatchesSafe(): Promise<{ data: MatchItem[] }> {
   try {
     const { data, error } = await supabase.from('matches').select('*').order('match_date', { ascending: false });
     if (!error && Array.isArray(data)) {
-      if (data.length > 0) {
-        saveLocalMatches(data);
-        return { data };
-      } else {
-        try {
-          await supabase.from('matches').upsert(DEFAULT_MATCHES, { onConflict: 'id' });
-        } catch {}
-        saveLocalMatches(DEFAULT_MATCHES);
-        return { data: DEFAULT_MATCHES };
-      }
+      saveLocalMatches(data);
+      return { data };
     }
   } catch (err) {
     console.warn('Supabase fetchMatches error:', err);
@@ -1021,7 +952,7 @@ export async function fetchMatchesSafe(): Promise<{ data: MatchItem[] }> {
     const res = await fetch('/api/matches');
     if (res.ok) {
       const data = await res.json();
-      if (Array.isArray(data) && data.length > 0) {
+      if (Array.isArray(data)) {
         saveLocalMatches(data);
         return { data };
       }

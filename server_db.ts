@@ -92,15 +92,8 @@ export function initSqliteSchema(db: any) {
     );
   `);
 
-  const insertMatch = db.prepare(`
-    INSERT OR IGNORE INTO matches (id, match_date, team_a, team_b, team_a_score, team_b_score, winner_team, loser_team, notes, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  insertMatch.run('m1-2026-03-23-01', '2026-03-23', 'Team 1: Leader Cá Kiếm', 'Team 2: Leader Minato', 3, 1, 'Team 1: Leader Cá Kiếm', 'Team 2: Leader Minato', 'Trận mở màn chiến dịch - Map Malinovka', '2026-03-23T14:30:00Z');
-  insertMatch.run('m2-2026-03-23-02', '2026-03-23', 'Team 3: Đấu giá', 'Team 4: Vá lốp', 2, 3, 'Team 4: Vá lốp', 'Team 3: Đấu giá', 'Map Himmelsdorf - Kịch tính đến phút cuối', '2026-03-23T16:00:00Z');
-  insertMatch.run('m3-2026-03-24-01', '2026-03-24', 'Team 1: Leader Cá Kiếm', 'Team 3: Đấu giá', 3, 0, 'Team 1: Leader Cá Kiếm', 'Team 3: Đấu giá', 'Thắng áp đảo - Map Prokhorovka', '2026-03-24T15:00:00Z');
-  insertMatch.run('m4-2026-03-24-02', '2026-03-24', 'Team 2: Leader Minato', 'Team 4: Vá lốp', 3, 2, 'Team 2: Leader Minato', 'Team 4: Vá lốp', 'Lội ngược dòng phút 14', '2026-03-24T17:15:00Z');
-  insertMatch.run('m5-2026-03-25-01', '2026-03-25', 'Team 1: Leader Cá Kiếm', 'Team 4: Vá lốp', 2, 2, 'Hòa', '', 'Hòa điểm kỹ thuật - Trận đánh nghẹt thở', '2026-03-25T14:00:00Z');
+  // Clear sample matches if present
+  db.exec(`DELETE FROM matches WHERE id LIKE 'm1-%' OR id LIKE 'm2-%' OR id LIKE 'm3-%' OR id LIKE 'm4-%' OR id LIKE 'm5-%';`);
 
   const insertNews = db.prepare(`
     INSERT OR IGNORE INTO news (id, title, content, created_at)
