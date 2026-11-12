@@ -283,7 +283,10 @@ export default function MatchStatsManager({ canManage = true }: MatchStatsManage
     return Array.from(set);
   }, [teams, matches]);
 
-  // Daily Matches Breakdown (Matches per day)
+  // Selected date filter mode
+  const [selectedDayFocus, setSelectedDayFocus] = useState<string | null>(null);
+
+  // Daily Matches Breakdown (Matches per day with Win/Loss/Score details)
   const dailyStats = useMemo(() => {
     const map: Record<string, MatchItem[]> = {};
     matches.forEach(m => {
@@ -293,12 +296,49 @@ export default function MatchStatsManager({ canManage = true }: MatchStatsManage
     });
 
     const dates = Object.keys(map).sort((a, b) => b.localeCompare(a));
-    return dates.map(date => ({
-      date,
-      count: map[date].length,
-      matches: map[date]
-    }));
+    return dates.map(date => {
+      const dayMatches = map[date];
+      let wins = 0;
+      let losses = 0;
+      let draws = 0;
+      let totalScoreA = 0;
+      let totalScoreB = 0;
+      const teamsInvolvedSet = new Set<string>();
+
+      dayMatches.forEach(m => {
+        if (m.team_a) teamsInvolvedSet.add(m.team_a);
+        totalScoreA += m.team_a_score || 0;
+        totalScoreB += m.team_b_score || 0;
+
+        const isWin = m.winner_team === m.team_a || (m.team_a_score > m.team_b_score && m.winner_team !== 'Hòa' && m.winner_team !== m.team_b);
+        const isDraw = m.winner_team === 'Hòa' || (m.team_a_score === m.team_b_score && (!m.winner_team || m.winner_team === 'Hòa'));
+
+        if (isWin) wins++;
+        else if (isDraw) draws++;
+        else losses++;
+      });
+
+      const winRate = dayMatches.length > 0 ? (wins / dayMatches.length) * 100 : 0;
+
+      return {
+        date,
+        count: dayMatches.length,
+        wins,
+        losses,
+        draws,
+        totalScoreA,
+        totalScoreB,
+        winRate,
+        teamsCount: teamsInvolvedSet.size,
+        matches: dayMatches
+      };
+    });
   }, [matches]);
+
+  // Max matches in a single day for visual bar scaling
+  const maxDayMatches = useMemo(() => {
+    return Math.max(...dailyStats.map(d => d.count), 1);
+  }, [dailyStats]);
 
   // Overall KPI metrics
   const totalMatchesCount = matches.length;
@@ -309,7 +349,7 @@ export default function MatchStatsManager({ canManage = true }: MatchStatsManage
   // Filtered Matches list
   const filteredMatches = matches.filter(m => {
     const matchTeam = filterTeam === 'all' || m.team_a === filterTeam || m.team_b === filterTeam;
-    const matchDate = filterDate === 'all' || m.match_date === filterDate;
+    const matchDate = (filterDate === 'all' && (!selectedDayFocus || m.match_date === selectedDayFocus)) || m.match_date === filterDate;
     const searchMatch = !searchTerm.trim() || 
       m.team_a.toLowerCase().includes(searchTerm.toLowerCase()) ||
       m.team_b.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -534,20 +574,120 @@ export default function MatchStatsManager({ canManage = true }: MatchStatsManage
         </div>
       </div>
 
-      {/* Section 2: Matches per Day Breakdown */}
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-zinc-200">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-zinc-100">
+      {/* Section 2: Daily Statistics Cards & Breakdown */}
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-zinc-200 space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-zinc-100">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-amber-50 text-amber-600 rounded-2xl">
               <Calendar size={22} />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-zinc-900">Thống Kê Số Trận Theo Ngày (Match Frequency Log)</h3>
-              <p className="text-xs text-zinc-500">Danh sách tổng hợp các trận đấu theo từng ngày thi đấu</p>
+              <h3 className="text-lg font-bold text-zinc-900">Thống Kê Chi Tiết Trận Đánh Theo Ngày</h3>
+              <p className="text-xs text-zinc-500">Phân tích số trận, tỷ lệ Thắng / Thua và tổng điểm theo từng ngày giao tranh</p>
             </div>
           </div>
 
-          {/* Filters */}
+          {selectedDayFocus && (
+            <button
+              onClick={() => setSelectedDayFocus(null)}
+              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 self-start md:self-auto"
+            >
+              <X size={14} />
+              <span>Bỏ chọn lọc ngày ({selectedDayFocus})</span>
+            </button>
+          )}
+        </div>
+
+        {/* Daily Summary Cards Grid */}
+        {dailyStats.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {dailyStats.map(d => {
+              const isSelected = selectedDayFocus === d.date || filterDate === d.date;
+              const barPercentage = Math.min((d.count / maxDayMatches) * 100, 100);
+
+              return (
+                <div
+                  key={d.date}
+                  onClick={() => {
+                    if (selectedDayFocus === d.date) {
+                      setSelectedDayFocus(null);
+                    } else {
+                      setSelectedDayFocus(d.date);
+                      setFilterDate('all');
+                    }
+                  }}
+                  className={`p-4 rounded-2xl border transition-all cursor-pointer relative overflow-hidden group ${
+                    isSelected
+                      ? 'bg-indigo-900 text-white border-indigo-700 shadow-lg ring-2 ring-indigo-500'
+                      : 'bg-zinc-50 hover:bg-zinc-100/80 border-zinc-200 text-zinc-900'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-lg ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-zinc-200 text-zinc-800'
+                    }`}>
+                      📅 {d.date}
+                    </span>
+                    <span className={`text-xs font-extrabold ${isSelected ? 'text-amber-300' : 'text-indigo-600'}`}>
+                      {d.count} trận
+                    </span>
+                  </div>
+
+                  {/* Relative bar chart representation */}
+                  <div className={`w-full h-1.5 rounded-full overflow-hidden mb-3 ${isSelected ? 'bg-white/20' : 'bg-zinc-200'}`}>
+                    <div
+                      className={`h-full rounded-full ${isSelected ? 'bg-amber-400' : 'bg-indigo-600'}`}
+                      style={{ width: `${Math.max(barPercentage, 8)}%` }}
+                    />
+                  </div>
+
+                  {/* Win / Loss / Draw breakdown badges */}
+                  <div className="grid grid-cols-3 gap-1 text-center py-2 rounded-xl bg-black/5 dark:bg-white/5 border border-black/5 text-xs font-medium">
+                    <div>
+                      <span className="block text-[10px] opacity-70">Thắng</span>
+                      <strong className={isSelected ? 'text-emerald-300 font-bold' : 'text-emerald-600 font-bold'}>
+                        {d.wins}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] opacity-70">Hòa</span>
+                      <strong className={isSelected ? 'text-amber-300 font-bold' : 'text-amber-600 font-bold'}>
+                        {d.draws}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="block text-[10px] opacity-70">Thua</span>
+                      <strong className={isSelected ? 'text-rose-300 font-bold' : 'text-rose-600 font-bold'}>
+                        {d.losses}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Score & Winrate info */}
+                  <div className="mt-3 pt-2 border-t border-black/5 flex items-center justify-between text-[11px] opacity-90">
+                    <span>Tỷ số: <strong>{d.totalScoreA} - {d.totalScoreB}</strong></span>
+                    <span>Tỷ lệ thắng: <strong>{d.winRate.toFixed(0)}%</strong></span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="p-6 bg-zinc-50 rounded-2xl text-center text-zinc-500 text-xs">
+            Chưa có dữ liệu thống kê trận đánh theo ngày. Hãy nhấn "Ghi nhận trận đánh mới" để tạo.
+          </div>
+        )}
+
+        {/* Filters Header for Logs */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pt-4 border-t border-zinc-100">
+          <div className="flex items-center gap-2">
+            <Swords size={18} className="text-indigo-600" />
+            <h4 className="text-sm font-bold text-zinc-900">
+              Nhật Ký Trận Đánh
+              {selectedDayFocus ? ` (Ngày ${selectedDayFocus})` : ''}
+            </h4>
+          </div>
+
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
@@ -562,10 +702,15 @@ export default function MatchStatsManager({ canManage = true }: MatchStatsManage
 
             <select
               value={filterDate}
-              onChange={e => setFilterDate(e.target.value)}
+              onChange={e => {
+                setFilterDate(e.target.value);
+                if (e.target.value !== 'all') setSelectedDayFocus(null);
+              }}
               className="px-3 py-2 text-xs bg-zinc-50 border border-zinc-200 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-700 font-medium"
             >
-              <option value="all">Tất cả các ngày ({dailyStats.length} ngày)</option>
+              <option value="all">
+                {selectedDayFocus ? `Đang chọn: ${selectedDayFocus}` : `Tất cả các ngày (${dailyStats.length} ngày)`}
+              </option>
               {dailyStats.map(d => (
                 <option key={d.date} value={d.date}>
                   {d.date} ({d.count} trận)
